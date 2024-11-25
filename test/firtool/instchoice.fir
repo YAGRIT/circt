@@ -1,6 +1,6 @@
 ; RUN: firtool %s --parse-only | FileCheck %s
 
-FIRRTL version 4.0.0
+FIRRTL version 4.1.0
 circuit Foo:
   ; CHECK: firrtl.option @Platform
   option Platform:
@@ -30,6 +30,4 @@ circuit Foo:
       FPGA => FPGATarget
       ASIC => ASICTarget
 
-    inst.clock <= clock
-
-
+    connect inst.clock, clock

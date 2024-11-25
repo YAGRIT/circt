@@ -1,4 +1,4 @@
-//===-- Passes.td - Verif pass definition file ----------------*- tablegen -*-===//
+//===-- Passes.td - Verif pass definition file -------------*- tablegen -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -15,31 +15,31 @@
 
 include "mlir/Pass/PassBase.td"
 
-/**
- * Performs preparation transformations for formal verification.
- * This includes things like flattening wires, removing unnecessary information
- * such as OM Classes, handles formal contracts and transforms module instances.
- */
- def PrepareForFormal : Pass<"prepare-for-formal", "hw::HWModuleOp"> {
-  let summary = "Prepares a given top-level circuit for formal verification.";
+def PrepareForFormalPass : Pass<"prepare-for-formal", "hw::HWModuleOp"> {
+  let summary = "Prepares a given top-level circuit for formal verification";
   let description = [{
     Prepares a circuit for formal verification. This performs semantic-retaining 
-    transformations that make model checking easier, e.g. flattening wires, handling 
-    formal contracts, removing unwanted information such as OM Classes, etc...
+    transformations that make model checking easier, e.g. flattening wires,
+    handling formal contracts, removing unwanted information such as OM Classes,
+    etc.
   }];
-  let constructor = "circt::verif::createPrepareForFormalPass()";
- }
+}
 
-/**
- * Checks the validity of clocked assertions, assumptions, and cover ops.
- */
-def VerifyClockedAssertLike : Pass<"verify-clocked-assert-like", "hw::HWModuleOp"> {
-  let summary = "Check that clocked-assert-like are valid.";
+def VerifyClockedAssertLikePass : Pass<"verify-clocked-assert-like",
+                                       "hw::HWModuleOp"> {
+  let summary = "Check that clocked-assert-like are valid";
   let description = [{
-    Checks that every `clocked_assert`, `clocked_assume` or `clocked_cover` op does not contain 
-    a nested `ltl.clock` or `ltl.disable` operation in its operand tree.
+    Checks that every `clocked_assert`, `clocked_assume` or `clocked_cover` op
+    does not contain a nested `ltl.clock` or `ltl.disable` operation in its
+    operand tree.
   }];
-  let constructor = "circt::verif::createVerifyClockedAssertLikePass()";
+}
+
+def LowerFormalToHWPass : Pass<"lower-formal-to-hw", "mlir::ModuleOp"> {
+  let summary = "Lower verif.formal ops to hw.module ops";
+  let description = [{
+    Converts `verif.formal` ops into `hw.module` ops.
+  }];
 }
 
 #endif // CIRCT_DIALECT_VERIF_PASSES_TD

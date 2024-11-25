@@ -10,12 +10,45 @@
 //
 //===----------------------------------------------------------------------===//
 
+include "mlir/IR/BuiltinAttributeInterfaces.td"
+
 /// Base class for Calyx primitives.
 class CalyxPrimitive<string mnemonic, list<Trait> traits = []> :
   CalyxCell<mnemonic, traits> {
     let assemblyFormat = "$sym_name attr-dict `:` qualified(type(results))";
     let arguments = (ins SymbolNameAttr:$sym_name);
     let skipDefaultBuilders = 1;
+}
+
+def ConstantOp: CalyxPrimitive<"constant",
+    [ConstantLike, DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>
+    ]> {
+  let summary = "constant capable of representing an integer or floating point value";
+  let description = [{
+    The `constant` operation is a wrapper around bit vectors with fixed-size number of bits.
+    Specific value and intended type should be specified via attribute only.
+
+    Example:
+
+    ```
+    // Integer constant
+    %1 = calyx.constant <42 : i32> : i32
+
+    // Floating point constant
+    %1 = calyx.constant <4.2 : f32> : i32
+    ```
+  }];
+  let arguments = (ins SymbolNameAttr:$sym_name, TypedAttrInterface:$value);
+
+  let results = (outs AnySignlessInteger:$out);
+
+  let builders = [
+    OpBuilder <(ins "StringRef":$sym_name, "Attribute":$attr, "Type":$type)>,
+  ];
+
+  let hasFolder = 1;
+  let assemblyFormat = "$sym_name ` ` `<` $value `>` attr-dict `:` qualified(type($out))";
+  let hasVerifier = 1;
 }
 
 /// The n-bit, undef op which only provides the out signal
@@ -224,8 +257,8 @@ def SeqMemoryOp : CalyxPrimitive<"seq_mem", []> {
   }];
 }
 
-class CalyxLibraryOp<string mnemonic, list<Trait> traits = []> :
-  CalyxPrimitive<"std_" # mnemonic, traits> {
+class CalyxLibraryOp<string mnemonic, string prefix = "std_", list<Trait> traits = []> :
+  CalyxPrimitive<prefix # mnemonic, traits> {
 
   let summary = "Defines an operation which maps to a Calyx library primitive";
   let description = [{
@@ -256,7 +289,7 @@ class CalyxLibraryOp<string mnemonic, list<Trait> traits = []> :
   ];
 }
 
-class BoolBinaryLibraryOp<string mnemonic> : CalyxLibraryOp<mnemonic, [
+class BoolBinaryLibraryOp<string mnemonic> : CalyxLibraryOp<mnemonic, "std_", [
     Combinational,
     SameTypeConstraint<"left", "right">
   ]> {
@@ -276,13 +309,13 @@ def SneqLibOp : BoolBinaryLibraryOp<"sneq"> {}
 def SgeLibOp  : BoolBinaryLibraryOp<"sge"> {}
 def SleLibOp  : BoolBinaryLibraryOp<"sle"> {}
 
-class ArithBinaryLibraryOp<string mnemonic, list<Trait> traits = []> :
-  CalyxLibraryOp<mnemonic, !listconcat(traits, [
+class ArithBinaryLibraryOp<string mnemonic, string prefix, list<Trait> traits = []> :
+  CalyxLibraryOp<mnemonic, prefix, !listconcat(traits, [
     SameTypeConstraint<"left", "right">
   ])> {}
 
 class CombinationalArithBinaryLibraryOp<string mnemonic> :
-  ArithBinaryLibraryOp<mnemonic, [
+  ArithBinaryLibraryOp<mnemonic, "std_", [
     Combinational,
     SameTypeConstraint<"left", "out">
   ]> {
@@ -299,7 +332,88 @@ def AndLibOp  : CombinationalArithBinaryLibraryOp<"and"> {}
 def OrLibOp   : CombinationalArithBinaryLibraryOp<"or"> {}
 def XorLibOp  : CombinationalArithBinaryLibraryOp<"xor"> {}
 
-def MuxLibOp : CalyxLibraryOp<"mux", [
+class ArithBinaryFloatingPointLibraryOp<string mnemonic> :
+  ArithBinaryLibraryOp<mnemonic, "", [
+    DeclareOpInterfaceMethods<FloatingPointOpInterface>,
+    SameTypeConstraint<"left", "out">
+  ]> {}
+
+def AddFOpIEEE754 : ArithBinaryFloatingPointLibraryOp<"ieee754.add"> {
+  let results = (outs I1:$clk, I1:$reset, I1:$go, I1:$control, I1:$subOp,
+    AnySignlessInteger:$left, AnySignlessInteger:$right, AnySignlessInteger:$roundingMode, AnySignlessInteger:$out,
+    AnySignlessInteger:$exceptionalFlags, I1:$done);
+
+  let extraClassDefinition = [{
+    SmallVector<StringRef> $cppClass::portNames() {
+      return {clkPort, resetPort, goPort, "control", "subOp",
+              "left", "right", "roundingMode", "out", "exceptionalFlags", donePort
+      };
+    }
+
+    SmallVector<Direction> $cppClass::portDirections() {
+      return {Input, Input, Input, Input, Input, Input, Input, Input, Output, Output, Output};
+    }
+
+    void $cppClass::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+      getCellAsmResultNames(setNameFn, *this, this->portNames());
+    }
+
+    bool $cppClass::isCombinational() { return false; }
+
+    SmallVector<DictionaryAttr> $cppClass::portAttributes() {
+      IntegerAttr isSet = IntegerAttr::get(IntegerType::get(getContext(), 1), 1);
+      NamedAttrList go, clk, reset, done;
+      go.append(goPort, isSet);
+      clk.append(clkPort, isSet);
+      reset.append(resetPort, isSet);
+      done.append(donePort, isSet);
+      return {clk.getDictionary(getContext()), reset.getDictionary(getContext()),
+              go.getDictionary(getContext()), DictionaryAttr::get(getContext()),
+              DictionaryAttr::get(getContext()), DictionaryAttr::get(getContext()),
+              DictionaryAttr::get(getContext()), DictionaryAttr::get(getContext()),
+              DictionaryAttr::get(getContext()), done.getDictionary(getContext()),
+              DictionaryAttr::get(getContext())
+      };
+    }
+  }];
+}
+
+def MulFOpIEEE754 : ArithBinaryFloatingPointLibraryOp<"ieee754.mul"> {
+  let results = (outs I1:$clk, I1:$reset, I1:$go, I1:$control,
+    AnySignlessInteger:$left, AnySignlessInteger:$right, AnySignlessInteger:$roundingMode, AnySignlessInteger:$out,
+    AnySignlessInteger:$exceptionalFlags, I1:$done);
+  let assemblyFormat = "$sym_name attr-dict `:` qualified(type(results))";
+  let extraClassDefinition = [{
+    SmallVector<StringRef> $cppClass::portNames() {
+      return {clkPort, resetPort, goPort, "control", "left", "right",
+              "roundingMode", "out", "exceptionalFlags", donePort
+      };
+    }
+    SmallVector<Direction> $cppClass::portDirections() {
+      return {Input, Input, Input, Input, Input, Input, Input, Output, Output, Output};
+    }
+    void $cppClass::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+      getCellAsmResultNames(setNameFn, *this, this->portNames());
+    }
+    bool $cppClass::isCombinational() { return false; }
+    SmallVector<DictionaryAttr> $cppClass::portAttributes() {
+      IntegerAttr isSet = IntegerAttr::get(IntegerType::get(getContext(), 1), 1);
+      NamedAttrList go, clk, reset, done;
+      go.append(goPort, isSet);
+      clk.append(clkPort, isSet);
+      reset.append(resetPort, isSet);
+      done.append(donePort, isSet);
+      return {clk.getDictionary(getContext()), reset.getDictionary(getContext()),
+              go.getDictionary(getContext()), DictionaryAttr::get(getContext()),
+              DictionaryAttr::get(getContext()), DictionaryAttr::get(getContext()),
+              DictionaryAttr::get(getContext()), DictionaryAttr::get(getContext()),
+              done.getDictionary(getContext()), DictionaryAttr::get(getContext())
+      };
+    }
+  }];
+}
+
+def MuxLibOp : CalyxLibraryOp<"mux", "std_", [
   Combinational, SameTypeConstraint<"tru", "fal">, SameTypeConstraint<"tru", "out">
   ]> {
   let results = (outs I1:$cond, AnyType:$tru, AnyType:$fal, AnyType:$out);
@@ -321,7 +435,7 @@ def MuxLibOp : CalyxLibraryOp<"mux", [
   }];
 }
 
-class ArithBinaryPipeLibraryOp<string mnemonic> : ArithBinaryLibraryOp<mnemonic # "_pipe", [
+class ArithBinaryPipeLibraryOp<string mnemonic> : ArithBinaryLibraryOp<mnemonic # "_pipe", "std_", [
     SameTypeConstraint<"left", "out">
   ]> {
   let results = (outs I1:$clk, I1:$reset, I1:$go, AnyType:$left, AnyType:$right, AnyType:$out, I1:$done);
@@ -334,7 +448,7 @@ def RemUPipeLibOp : ArithBinaryPipeLibraryOp<"remu"> {}
 def RemSPipeLibOp : ArithBinaryPipeLibraryOp<"rems"> {}
 
 class UnaryLibraryOp<string mnemonic, list<Trait> traits = []> :
-    CalyxLibraryOp<mnemonic, !listconcat(traits, [Combinational])> {
+    CalyxLibraryOp<mnemonic, "std_", !listconcat(traits, [Combinational])> {
   let results = (outs AnyInteger:$in, AnyInteger:$out);
 }
 

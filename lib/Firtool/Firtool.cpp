@@ -59,15 +59,14 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
 
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createInjectDUTHierarchyPass());
 
+  if (!opt.shouldDisableOptimization())
+    pm.nest<firrtl::CircuitOp>().nestAny().addPass(mlir::createCSEPass());
+
   pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
       firrtl::createPassiveWiresPass());
 
   pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
       firrtl::createDropNamesPass(opt.getPreserveMode()));
-
-  if (!opt.shouldDisableOptimization())
-    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
-        mlir::createCSEPass());
 
   pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
       firrtl::createLowerCHIRRTLPass());
@@ -135,13 +134,16 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
   if (opt.shouldConvertProbesToSignals())
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createProbesToSignalsPass());
 
-  {
-    auto &modulePM = pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>();
-    modulePM.addPass(firrtl::createLayerMergePass());
-    modulePM.addPass(firrtl::createLayerSinkPass());
-  }
-
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createInlinerPass());
+
+  pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+      firrtl::createLayerMergePass());
+
+  if (opt.shouldAdvancedLayerSink())
+    pm.nest<firrtl::CircuitOp>().addPass(firrtl::createAdvancedLayerSinkPass());
+  else
+    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+        firrtl::createLayerSinkPass());
 
   // Preset the random initialization parameters for each module. The current
   // implementation assumes it can run at a time where every register is
@@ -174,8 +176,6 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
   if (!opt.shouldDisableOptimization())
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createIMConstPropPass());
 
-  pm.nest<firrtl::CircuitOp>().addPass(firrtl::createLowerLayersPass());
-
   pm.addNestedPass<firrtl::CircuitOp>(firrtl::createAddSeqMemPortsPass());
 
   pm.addPass(firrtl::createCreateSiFiveMetadataPass(
@@ -183,6 +183,8 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
       opt.getReplaceSequentialMemoriesFile()));
 
   pm.addNestedPass<firrtl::CircuitOp>(firrtl::createExtractInstancesPass());
+
+  pm.nest<firrtl::CircuitOp>().addPass(firrtl::createLowerLayersPass());
 
   // Run passes to resolve Grand Central features.  This should run before
   // BlackBoxReader because Grand Central needs to inform BlackBoxReader where
@@ -209,6 +211,8 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
     // Re-run IMConstProp to propagate constants produced by register
     // optimizations.
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createIMConstPropPass());
+    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+        createSimpleCanonicalizerPass());
     pm.addPass(firrtl::createIMDeadCodeElimPass());
   }
 
@@ -417,7 +421,7 @@ LogicalResult firtool::populateHWToBTOR2(mlir::PassManager &pm,
   pm.addNestedPass<hw::HWModuleOp>(circt::createLowerLTLToCorePass());
   pm.addNestedPass<hw::HWModuleOp>(circt::verif::createPrepareForFormalPass());
   pm.addPass(circt::hw::createFlattenModulesPass());
-  pm.addNestedPass<hw::HWModuleOp>(circt::createConvertHWToBTOR2Pass(os));
+  pm.addPass(circt::createConvertHWToBTOR2Pass(os));
   return success();
 }
 
@@ -563,6 +567,11 @@ struct FirtoolCmdOptions {
   llvm::cl::opt<std::string> omirOutFile{
       "output-omir", llvm::cl::desc("File name for the output omir"),
       llvm::cl::init("")};
+
+  llvm::cl::opt<bool> advancedLayerSink{
+      "advanced-layer-sink",
+      llvm::cl::desc("Sink logic into layer blocks (advanced)"),
+      llvm::cl::init(false)};
 
   llvm::cl::opt<bool> lowerMemories{
       "lower-memories",
@@ -747,10 +756,11 @@ circt::firtool::FirtoolOptions::FirtoolOptions()
       exportChiselInterface(false), chiselInterfaceOutDirectory(""),
       vbToBV(false), noDedup(false), companionMode(firrtl::CompanionMode::Bind),
       disableAggressiveMergeConnections(false), emitOMIR(true), omirOutFile(""),
-      lowerMemories(false), blackBoxRootPath(""), replSeqMem(false),
-      replSeqMemFile(""), extractTestCode(false), ignoreReadEnableMem(false),
-      disableRandom(RandomKind::None), outputAnnotationFilename(""),
-      enableAnnotationWarning(false), addMuxPragmas(false),
+      advancedLayerSink(false), lowerMemories(false), blackBoxRootPath(""),
+      replSeqMem(false), replSeqMemFile(""), extractTestCode(false),
+      ignoreReadEnableMem(false), disableRandom(RandomKind::None),
+      outputAnnotationFilename(""), enableAnnotationWarning(false),
+      addMuxPragmas(false),
       verificationFlavor(firrtl::VerificationFlavor::None),
       emitSeparateAlwaysBlocks(false), etcDisableInstanceExtraction(false),
       etcDisableRegisterExtraction(false), etcDisableModuleInlining(false),
@@ -782,6 +792,7 @@ circt::firtool::FirtoolOptions::FirtoolOptions()
       clOptions->disableAggressiveMergeConnections;
   emitOMIR = clOptions->emitOMIR;
   omirOutFile = clOptions->omirOutFile;
+  advancedLayerSink = clOptions->advancedLayerSink;
   lowerMemories = clOptions->lowerMemories;
   blackBoxRootPath = clOptions->blackBoxRootPath;
   replSeqMem = clOptions->replSeqMem;

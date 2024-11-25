@@ -4216,7 +4216,7 @@ LogicalResult StmtEmitter::visitSV(AliasOp op) {
 }
 
 LogicalResult StmtEmitter::visitSV(InterfaceInstanceOp op) {
-  auto doNotPrint = op->hasAttr("doNotPrint");
+  auto doNotPrint = op.getDoNotPrint();
   if (doNotPrint && !state.options.emitBindComments)
     return success();
 
@@ -5334,7 +5334,7 @@ LogicalResult StmtEmitter::visitSV(CaseOp op) {
 }
 
 LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
-  bool doNotPrint = op->hasAttr("doNotPrint");
+  bool doNotPrint = op.getDoNotPrint();
   if (doNotPrint && !state.options.emitBindComments)
     return success();
 
@@ -5894,7 +5894,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
     // Try inlining an assignment into declarations.
     // FIXME: Unpacked array is not inlined since several tools doesn't support
     // that syntax. See Issue 6363.
-    if (isa<sv::WireOp, LogicOp>(op) &&
+    if (isa<sv::WireOp>(op) &&
         !op->getParentOp()->hasTrait<ProceduralRegion>() &&
         !hasLeadingUnpackedType(op->getResult(0).getType())) {
       // Get a single assignments if any.

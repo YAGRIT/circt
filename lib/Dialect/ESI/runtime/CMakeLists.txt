@@ -113,6 +113,7 @@ set(ESICppRuntimeHeaders
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Common.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Context.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Design.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Logging.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Manifest.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Types.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/esi/Ports.h
@@ -185,21 +186,12 @@ else()
 endif()
 install(TARGETS ESICppRuntime
   DESTINATION ${PYLIBDIR}
+  RUNTIME_DEPENDENCIES
+    PRE_EXCLUDE_REGEXES .*
+    PRE_INCLUDE_REGEXES zlibd zlib libz
   COMPONENT ESIRuntime
 )
 
-if(NOT ESI_STATIC_RUNTIME)
-  install(IMPORTED_RUNTIME_ARTIFACTS ESICppRuntime
-    RUNTIME_DEPENDENCY_SET ESICppRuntime_RUNTIME_DEPS
-    COMPONENT ESIRuntime
-  )
-endif()
-install(RUNTIME_DEPENDENCY_SET ESICppRuntime_RUNTIME_DEPS
-  DESTINATION ${LIB_DIR}
-  PRE_EXCLUDE_REGEXES .*
-  PRE_INCLUDE_REGEXES zlibd zlib
-  COMPONENT ESIRuntime
-)
 install(FILES ${ESICppRuntimeHeaders}
   DESTINATION include/esi
   COMPONENT ESIRuntime

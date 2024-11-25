@@ -6,6 +6,7 @@
 ##
 ##===----------------------------------------------------------------------===//
 
+add_subdirectory(AIG)
 add_subdirectory(Arc)
 add_subdirectory(Calyx)
 add_subdirectory(Comb)
@@ -26,6 +27,10 @@ add_subdirectory(Moore)
 add_subdirectory(MSFT)
 add_subdirectory(OM)
 add_subdirectory(Pipeline)
+add_subdirectory(RTG)
+if (CIRCT_INCLUDE_TESTS)
+  add_subdirectory(RTGTest)
+endif()
 add_subdirectory(Ibis)
 add_subdirectory(Seq)
 add_subdirectory(Sim)

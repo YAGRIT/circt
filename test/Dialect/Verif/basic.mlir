@@ -36,60 +36,80 @@ verif.cover %s : !ltl.sequence
 verif.cover %p : !ltl.property
 
 //===----------------------------------------------------------------------===//
-// Formal
+// Formal Test
 //===----------------------------------------------------------------------===//
-hw.module @Foo(in %0 "0": i1, in %1 "1": i1, out "" : i1, out "1" : i1) {
-  hw.output %0 , %1: i1, i1
- }
 
-// CHECK: verif.formal @formal1(k = 20 : i64) {
-verif.formal @formal1(k = 20) {
-  // CHECK: %[[C1:.+]] = hw.constant true
-  %c1_i1 = hw.constant true
-  // CHECK: %[[SYM:.+]] = verif.symbolic_input : i1
-  %sym = verif.symbolic_input : i1
-  // CHECK: %[[CLK_U:.+]] = comb.xor %8, %[[C1]] : i1
-  %clk_update = comb.xor %8, %c1_i1 : i1
-  // CHECK: %8 = verif.concrete_input %[[C1]], %[[CLK_U]] : i1
-  %8 = verif.concrete_input %c1_i1, %clk_update : i1
-  // CHECK: %foo.0, %foo.1 = hw.instance "foo" @Foo("0": %6: i1, "1": %8: i1) -> ("": i1, "1": i1)
-  %foo.0, %foo.1 = hw.instance "foo" @Foo("0": %sym: i1, "1": %8 : i1) -> ("" : i1, "1" : i1)
+// CHECK-LABEL: verif.formal @EmptyFormalTest
+verif.formal @EmptyFormalTest {} {
 }
 
-// CHECK-LABEL: hw.module @Bar
-hw.module @Bar(in %foo : i8, out "" : i8, out "1" : i8) { 
-  // CHECK: %[[C1:.+]] = hw.constant
-  %c1_8 = hw.constant 1 : i8
-  // CHECK: %[[O1:.+]] = comb.add
-  %to0 = comb.add bin %foo, %c1_8 : i8
-  // CHECK: %[[O2:.+]] = comb.sub
-  %to1 = comb.sub bin %foo, %c1_8 : i8
+// CHECK-LABEL: verif.formal @FormalTestWithAttrs
+verif.formal @FormalTestWithAttrs {
+  // CHECK-SAME: a,
+  a,
+  // CHECK-SAME: b = "hello"
+  b = "hello",
+  // CHECK-SAME: c = 42 : i64
+  c = 42 : i64,
+  // CHECK-SAME: d = ["x", "y"]
+  d = ["x", "y"],
+  // CHECK-SAME: e = {u, v}
+  e = {u, v}
+} {
+}
 
-  // CHECK: %[[OUT:.+]]:2 = verif.contract(%[[O1]], %[[O2]]) : (i8, i8) -> (i8, i8) {
-  %o0, %o1 = verif.contract (%to0, %to1) : (i8, i8) -> (i8, i8) {
-    // CHECK: ^bb0(%[[BAR0:.+]]: i8, %[[BAR1:.+]]: i8):
-    ^bb0(%bar.0 : i8, %bar.1 : i8): 
-      // CHECK: %[[C0:.+]] = hw.constant 0 : i8
-      %c0_8 = hw.constant 0 : i8 
-      // CHECK: %[[PREC:.+]] = comb.icmp bin ugt %foo, %[[C0]] : i8
-      %prec = comb.icmp bin ugt %foo, %c0_8 : i8
-      // CHECK: verif.require %[[PREC]] : i1
-      verif.require %prec : i1
+// CHECK-LABEL: verif.formal @FormalTestBody
+verif.formal @FormalTestBody {} {
+  // CHECK: {{%.+}} = verif.symbolic_value : i42
+  %0 = verif.symbolic_value : i42
+}
 
-      // CHECK: %[[P0:.+]] = comb.icmp bin ugt %[[BAR0]], %foo : i8
-      %post = comb.icmp bin ugt %bar.0, %foo : i8
-      // CHECK: %[[P1:.+]] = comb.icmp bin ult %[[BAR1]], %foo : i8
-      %post1 = comb.icmp bin ult %bar.1, %foo : i8
-      // CHECK: verif.ensure %[[P0]] : i1
-      verif.ensure %post : i1
-      // CHECK: verif.ensure %[[P1]] : i1
-      verif.ensure %post1 : i1
-      // CHECK: verif.yield %[[BAR0]], %[[BAR1]] : i8, i8
-      verif.yield %bar.0, %bar.1 : i8, i8
-  } 
-  
-  // CHECK-LABEL: hw.output
-  hw.output %o0, %o1 : i8, i8
+//===----------------------------------------------------------------------===//
+// Contracts
+//===----------------------------------------------------------------------===//
+
+// CHECK: [[A:%.+]] = unrealized_conversion_cast to i42
+%a = unrealized_conversion_cast to i42
+// CHECK: [[B:%.+]] = unrealized_conversion_cast to i1337
+%b = unrealized_conversion_cast to i1337
+// CHECK: [[C:%.+]] = unrealized_conversion_cast to i9001
+%c = unrealized_conversion_cast to i9001
+// CHECK: [[CLOCK:%.+]] = unrealized_conversion_cast to !seq.clock
+%d = unrealized_conversion_cast to !seq.clock
+
+// CHECK: verif.contract {
+verif.contract {}
+// CHECK: {{%.+}} = verif.contract [[A]] : i42 {
+%q0 = verif.contract %a : i42 {}
+// CHECK: {{%.+}}:3 = verif.contract [[A]], [[B]], [[C]] : i42, i1337, i9001 {
+%q1:3 = verif.contract %a, %b, %c : i42, i1337, i9001 {}
+
+verif.contract {
+  // CHECK: verif.require {{%.+}} : i1
+  // CHECK: verif.require {{%.+}} if {{%.+}} : i1
+  // CHECK: verif.require {{%.+}} clock {{%.+}} : i1
+  // CHECK: verif.require {{%.+}} label "foo" : i1
+  // CHECK: verif.require {{%.+}} : !ltl.sequence
+  // CHECK: verif.require {{%.+}} : !ltl.property
+  verif.require %true : i1
+  verif.require %true if %true : i1
+  verif.require %true clock %d : i1
+  verif.require %true label "foo" : i1
+  verif.require %s : !ltl.sequence
+  verif.require %p : !ltl.property
+
+  // CHECK: verif.ensure {{%.+}} : i1
+  // CHECK: verif.ensure {{%.+}} if {{%.+}} : i1
+  // CHECK: verif.ensure {{%.+}} clock {{%.+}} : i1
+  // CHECK: verif.ensure {{%.+}} label "foo" : i1
+  // CHECK: verif.ensure {{%.+}} : !ltl.sequence
+  // CHECK: verif.ensure {{%.+}} : !ltl.property
+  verif.ensure %true : i1
+  verif.ensure %true if %true : i1
+  verif.ensure %true clock %d : i1
+  verif.ensure %true label "foo" : i1
+  verif.ensure %s : !ltl.sequence
+  verif.ensure %p : !ltl.property
 }
 
 //===----------------------------------------------------------------------===//
@@ -144,13 +164,13 @@ verif.lec {verif.some_attr} first {
 // Bounded Model Checking related operations
 //===----------------------------------------------------------------------===//
 
-// CHECK: verif.bmc bound 10 num_regs 0 attributes {verif.some_attr} init {
+// CHECK: verif.bmc bound 10 num_regs 0 initial_values [] attributes {verif.some_attr} init {
 // CHECK: } loop {
 // CHECK: } circuit {
 // CHECK: ^bb0(%{{.*}}):
 // CHECK: verif.yield %{{.*}} : i32
 // CHECK: }
-verif.bmc bound 10 num_regs 0 attributes {verif.some_attr} init {
+verif.bmc bound 10 num_regs 0 initial_values [] attributes {verif.some_attr} init {
 } loop {
 } circuit {
 ^bb0(%arg0: i32):
@@ -160,7 +180,7 @@ verif.bmc bound 10 num_regs 0 attributes {verif.some_attr} init {
   verif.yield %arg0 : i32
 }
 
-//CHECK: verif.bmc bound 10 num_regs 1 attributes {verif.some_attr}
+//CHECK: verif.bmc bound 10 num_regs 1 initial_values [unit] attributes {verif.some_attr}
 //CHECK: init {
 //CHECK:   %{{.*}} = hw.constant false
 //CHECK:   %{{.*}} = seq.to_clock %{{.*}}
@@ -182,7 +202,7 @@ verif.bmc bound 10 num_regs 0 attributes {verif.some_attr} init {
 //CHECK:   %{{.*}} = comb.xor %{{.*}}, %{{.*}} : i32
 //CHECK:   verif.yield %{{.*}}, %{{.*}} : i32, i32
 //CHECK: }
-verif.bmc bound 10 num_regs 1 attributes {verif.some_attr}
+verif.bmc bound 10 num_regs 1 initial_values [unit] attributes {verif.some_attr}
 init {
   %c0_i1 = hw.constant 0 : i1
   %clk = seq.to_clock %c0_i1

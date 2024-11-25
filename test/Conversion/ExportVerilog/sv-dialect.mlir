@@ -27,8 +27,9 @@ hw.module @M1<param1: i42>(in %clock : i1, in %cond : i1, in %val : i8) {
   // CHECK: localparam [41:0]{{ *}} param_y = param1;
   %param_y = sv.localparam { value = #hw.param.decl.ref<"param1"> : i42 } : i42
 
-  // CHECK:        logic{{ *}} [7:0]{{ *}} logic_op = val;
+  // CHECK:        logic{{ *}} [7:0]{{ *}} logic_op;
   // CHECK-NEXT: struct packed {logic b; } logic_op_struct;
+  // CHECK-NEXT: assign logic_op = val;
   %logic_op = sv.logic : !hw.inout<i8>
   %logic_op_struct = sv.logic : !hw.inout<struct<b: i1>>
   sv.assign %logic_op, %val: i8
@@ -1273,6 +1274,22 @@ hw.module @InlineAutomaticLogicInit(in %a : i42, in %b: i42, in %really_really_l
   }
 }
 
+// CHECK-LABEL:  module InlineNonProceduralContinuousNetAssignment(
+hw.module @InlineNonProceduralContinuousNetAssignment(in %a: i1) {
+  // CHECK:     wire  someWire = a;
+  // CHECK-NOT: assign
+  %someWire = sv.wire {hw.verilogName = "someWire"} : !hw.inout<i1>
+  sv.assign %someWire, %a : i1
+  // CHECK:      logic  someLogic;
+  // CHECK-NEXT: assign someLogic = a;
+  %someLogic = sv.logic {hw.verilogName = "someLogic"} : !hw.inout<i1>
+  sv.assign %someLogic, %a : i1
+  // CHECK:      reg  someReg;
+  // CHECK-NEXT: assign someReg = a;
+  %someReg = sv.reg {hw.verilogName = "someReg"} : !hw.inout<i1>
+  sv.assign %someReg, %a : i1
+}
+
 // Issue #2335: https://github.com/llvm/circt/issues/2335
 // CHECK-LABEL: module AggregateTemporay(
 hw.module @AggregateTemporay(in %clock: i1, in %foo: i1, in %bar: i25) {
@@ -1326,9 +1343,7 @@ hw.module @wait_order() {
   // CHECK-NEXT:   .b (wait_order_0.baz.x.y.z[42])
   // CHECK-NEXT: );
   // CHECK-NEXT: */
-  hw.instance "baz" sym @baz @XMRRef_Baz(a: %xmrRead: i2, b: %xmr2Read: i1) -> () {
-    doNotPrint = true
-  }
+  hw.instance "baz" sym @baz @XMRRef_Baz(a: %xmrRead: i2, b: %xmr2Read: i1) -> () {doNotPrint}
   // CHECK-NEXT: XMRRef_Qux qux (
   // CHECK-NEXT:   .a (wait_order_0.bar.new_0),
   // CHECK-NEXT:   .b (wait_order_0.baz.x.y.z[42])
@@ -1359,8 +1374,8 @@ hw.module @InlineBind(in %a_in: i8, out wire: i8){
   %0 = sv.wire : !hw.inout<i8>
   %1 = sv.read_inout %0: !hw.inout<i8>
   %2 = comb.add %a_in, %1 : i8
-  %3 = hw.instance "ext1" sym @foo1 @ExtModule(in: %2: i8) -> (out: i8) {doNotPrint=1}
-  %4 = hw.instance "ext2" sym @foo2 @ExtModule(in: %3: i8) -> (out: i8) {doNotPrint=1}
+  %3 = hw.instance "ext1" sym @foo1 @ExtModule(in: %2: i8) -> (out: i8) {doNotPrint}
+  %4 = hw.instance "ext2" sym @foo2 @ExtModule(in: %3: i8) -> (out: i8) {doNotPrint}
   hw.output %4: i8
 }
 
@@ -1411,9 +1426,9 @@ hw.module @remoteInstDut(in %i: i1, in %j: i1, in %z: i0) {
   %output = sv.reg : !hw.inout<i1>
   %myreg_rd1 = sv.read_inout %output: !hw.inout<i1>
   %0 = hw.constant 1 : i1
-  hw.instance "a1" sym @bindInst @extInst(_h: %mywire_rd: i1, _i: %myreg_rd: i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint=1}
-  hw.instance "a2" sym @bindInst2 @extInst(_h: %mywire_rd: i1, _i: %myreg_rd: i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint=1}
-  hw.instance "signed" sym @bindInst3 @extInst2(signed: %mywire_rd1 : i1, _i: %myreg_rd1 : i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint=1}
+  hw.instance "a1" sym @bindInst @extInst(_h: %mywire_rd: i1, _i: %myreg_rd: i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint}
+  hw.instance "a2" sym @bindInst2 @extInst(_h: %mywire_rd: i1, _i: %myreg_rd: i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint}
+  hw.instance "signed" sym @bindInst3 @extInst2(signed: %mywire_rd1 : i1, _i: %myreg_rd1 : i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint}
 // CHECK:      wire mywire
 // CHECK-NEXT: myreg
 // CHECK-NEXT: wire signed_0
@@ -1927,7 +1942,7 @@ sv.bind #hw.innerNameRef<@remoteInstDut::@bindInst2>
 // Regression test for a bug where bind emission would not use sanitized names.
 hw.module @NastyPortParent() {
   %false = hw.constant false
-  %0 = hw.instance "foo" sym @foo @NastyPort(".lots$of.dots": %false: i1) -> (".more.dots": i1) {doNotPrint = true}
+  %0 = hw.instance "foo" sym @foo @NastyPort(".lots$of.dots": %false: i1) -> (".more.dots": i1) {doNotPrint}
 }
 hw.module @NastyPort(in %.lots$of.dots: i1, out ".more.dots": i1) {
   %false = hw.constant false

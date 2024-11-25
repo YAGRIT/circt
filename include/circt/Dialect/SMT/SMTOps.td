@@ -153,6 +153,23 @@ def AssertOp : SMTOp<"assert", []> {
   let assemblyFormat = "$input attr-dict";
 }
 
+def ResetOp : SMTOp<"reset", []> {
+  let summary = "reset the solver";
+  let assemblyFormat = "attr-dict";
+}
+
+def PushOp : SMTOp<"push", []> {
+  let summary = "push a given number of levels onto the assertion stack";
+  let arguments = (ins ConfinedAttr<I32Attr, [IntNonNegative]>:$count);
+  let assemblyFormat = "$count attr-dict";
+}
+
+def PopOp : SMTOp<"pop", []> {
+  let summary = "pop a given number of levels from the assertion stack";
+  let arguments = (ins ConfinedAttr<I32Attr, [IntNonNegative]>:$count);
+  let assemblyFormat = "$count attr-dict";
+}
+
 def CheckOp : SMTOp<"check", [
   NoRegionArguments,
   SingleBlockImplicitTerminator<"smt::YieldOp">,

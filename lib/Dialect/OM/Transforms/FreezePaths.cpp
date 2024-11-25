@@ -42,6 +42,7 @@ struct PathVisitor {
   LogicalResult process(PathCreateOp pathOp);
   LogicalResult process(EmptyPathOp pathOp);
   LogicalResult process(ListCreateOp listCreateOp);
+  LogicalResult process(ObjectFieldOp objectFieldOp);
   LogicalResult run(ModuleOp module);
   hw::InstanceGraph &instanceGraph;
   hw::InnerRefNamespace &irn;
@@ -89,8 +90,7 @@ static bool hasPathType(Type type) {
   return isPathType;
 }
 
-// Convert potentially nested lists of PathType or BasePathType to frozen lists.
-static Type processType(Type type) {
+mlir::AttrTypeReplacer makeReplacer() {
   mlir::AttrTypeReplacer replacer;
   replacer.addReplacement([](BasePathType innerType) {
     return FrozenBasePathType::get(innerType.getContext());
@@ -98,7 +98,12 @@ static Type processType(Type type) {
   replacer.addReplacement([](PathType innerType) {
     return FrozenPathType::get(innerType.getContext());
   });
+  return replacer;
+}
 
+// Convert potentially nested lists of PathType or BasePathType to frozen lists.
+static Type processType(Type type) {
+  mlir::AttrTypeReplacer replacer = makeReplacer();
   return replacer.replace(type);
 }
 
@@ -161,14 +166,14 @@ LogicalResult PathVisitor::processPath(Location loc, hw::HierPathOp hierPathOp,
       // If this is our inner ref pair: [Foo::bar]
       // if "bar" is an instance, modules = [Foo::bar], bottomModule = Bar.
       // if "bar" is a wire, modules = [], bottomModule = Foo, component = bar.
-      if (isa<hw::HWInstanceLike>(op)) {
+      if (auto inst = dyn_cast<hw::HWInstanceLike>(op)) {
         // TODO: add support for instance choices.
-        auto inst = dyn_cast<hw::InstanceOp>(op);
-        if (!inst)
+        auto mods = inst.getReferencedModuleNamesAttr();
+        if (mods.size() > 1)
           return op->emitError("unsupported instance operation");
         // We are targeting an instance.
         modules.emplace_back(currentModule, verilogName);
-        bottomModule = inst.getReferencedModuleNameAttr();
+        bottomModule = cast<StringAttr>(mods[0]);
         component = StringAttr::get(context, "");
         field = StringAttr::get(context, "");
       } else {
@@ -271,6 +276,27 @@ LogicalResult PathVisitor::process(ListCreateOp listCreateOp) {
   return success();
 }
 
+/// Replace an ObjectFieldOp of path types with frozen path types.
+LogicalResult PathVisitor::process(ObjectFieldOp objectFieldOp) {
+  Type resultType = objectFieldOp.getResult().getType();
+
+  // Check if there are any path types in the field.
+  if (!hasPathType(resultType))
+    return success();
+
+  // Create a new result Type with frozen path types.
+  auto newResultType = processType(resultType);
+
+  // Create a new op with the result type updated to replace path types.
+  OpBuilder builder(objectFieldOp);
+  auto newObjectFieldOp = builder.create<ObjectFieldOp>(
+      objectFieldOp.getLoc(), newResultType, objectFieldOp.getObject(),
+      objectFieldOp.getFieldPath());
+  objectFieldOp.replaceAllUsesWith(newObjectFieldOp.getResult());
+  objectFieldOp->erase();
+  return success();
+}
+
 LogicalResult PathVisitor::run(ModuleOp module) {
   auto updatePathType = [&](Value value) {
     if (hasPathType(value.getType()))
@@ -293,11 +319,17 @@ LogicalResult PathVisitor::run(ModuleOp module) {
       } else if (auto listCreate = dyn_cast<ListCreateOp>(op)) {
         if (failed(process(listCreate)))
           return WalkResult::interrupt();
+      } else if (auto objectField = dyn_cast<ObjectFieldOp>(op)) {
+        if (failed(process(objectField)))
+          return WalkResult::interrupt();
       }
       return WalkResult::advance();
     });
     if (result.wasInterrupted())
       return failure();
+
+    // Transform field types
+    classLike.replaceFieldTypes(makeReplacer());
   }
   return success();
 }

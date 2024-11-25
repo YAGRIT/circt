@@ -9,6 +9,9 @@ firrtl.circuit "Basic" attributes {
   } {
 firrtl.extmodule @Basic()
 
+// CHECK: firrtl.module @Top(in %arg0: !firrtl.uint<1>) attributes {portNames = [""]}
+firrtl.module @Top(in %arg0: !firrtl.uint<1>) attributes {portNames = [""]} {}
+
 // CHECK-LABEL: firrtl.module @Intrinsics
 firrtl.module @Intrinsics(in %ui : !firrtl.uint, in %clock: !firrtl.clock, in %ui1: !firrtl.uint<1>) {
   // CHECK-NEXT: firrtl.int.sizeof %ui : (!firrtl.uint) -> !firrtl.uint<32>
@@ -122,5 +125,12 @@ firrtl.module @PropertyListOps() {
   // CHECK: firrtl.list.concat [[L0]], [[L1]] : !firrtl.list<integer>
   %concat = firrtl.list.concat %l0, %l1 : !firrtl.list<integer>
 }
+
+// CHECK: firrtl.formal @myTestA, @Top {}
+firrtl.formal @myTestA, @Top {}
+// CHECK: firrtl.formal @myTestB, @Top {bound = 42 : i19}
+firrtl.formal @myTestB, @Top {bound = 42 : i19}
+// CHECK: firrtl.formal @myTestC, @Top {} attributes {foo}
+firrtl.formal @myTestC, @Top {} attributes {foo}
 
 }

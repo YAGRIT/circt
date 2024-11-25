@@ -44,7 +44,7 @@ public:
             // Variable/symbol declaration
             DeclareFunOp, ApplyFuncOp,
             // solver interaction
-            SolverOp, AssertOp, CheckOp,
+            SolverOp, AssertOp, ResetOp, PushOp, PopOp, CheckOp,
             // Boolean logic
             NotOp, AndOp, OrOp, XOrOp, ImpliesOp,
             // Arrays
@@ -124,6 +124,9 @@ public:
 
   HANDLE(SolverOp, Unhandled);
   HANDLE(AssertOp, Unhandled);
+  HANDLE(ResetOp, Unhandled);
+  HANDLE(PushOp, Unhandled);
+  HANDLE(PopOp, Unhandled);
   HANDLE(CheckOp, Unhandled);
 
   // Boolean logic operations

@@ -1199,6 +1199,21 @@ uint32_t CycleOp::getGroupLatency() {
 }
 
 //===----------------------------------------------------------------------===//
+// Floating Point Op
+//===----------------------------------------------------------------------===//
+FloatingPointStandard AddFOpIEEE754::getFloatingPointStandard() {
+  return FloatingPointStandard::IEEE754;
+}
+
+FloatingPointStandard MulFOpIEEE754::getFloatingPointStandard() {
+  return FloatingPointStandard::IEEE754;
+}
+
+std::string AddFOpIEEE754::getCalyxLibraryName() { return "std_addFN"; }
+
+std::string MulFOpIEEE754::getCalyxLibraryName() { return "std_mulFN"; }
+
+//===----------------------------------------------------------------------===//
 // GroupInterface
 //===----------------------------------------------------------------------===//
 
@@ -1954,6 +1969,77 @@ ParseResult GroupDoneOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
+// ConstantOp
+//===----------------------------------------------------------------------===//
+void ConstantOp::getAsmResultNames(
+    function_ref<void(Value, StringRef)> setNameFn) {
+  if (isa<FloatAttr>(getValue())) {
+    setNameFn(getResult(), "cst");
+    return;
+  }
+  auto intCst = llvm::dyn_cast<IntegerAttr>(getValue());
+  auto intType = llvm::dyn_cast<IntegerType>(getType());
+
+  // Sugar i1 constants with 'true' and 'false'.
+  if (intType && intType.getWidth() == 1)
+    return setNameFn(getResult(), intCst.getInt() > 0 ? "true" : "false");
+
+  // Otherwise, build a complex name with the value and type.
+  SmallString<32> specialNameBuffer;
+  llvm::raw_svector_ostream specialName(specialNameBuffer);
+  specialName << 'c' << intCst.getValue();
+  if (intType)
+    specialName << '_' << getType();
+  setNameFn(getResult(), specialName.str());
+}
+
+LogicalResult ConstantOp::verify() {
+  auto type = getType();
+  assert(isa<IntegerType>(type) && "must be an IntegerType");
+  // The value's bit width must match the return type bitwidth.
+  if (auto valTyBitWidth = getValue().getType().getIntOrFloatBitWidth();
+      valTyBitWidth != type.getIntOrFloatBitWidth()) {
+    return emitOpError() << "value type bit width" << valTyBitWidth
+                         << " must match return type: "
+                         << type.getIntOrFloatBitWidth();
+  }
+  // Integer values must be signless.
+  if (llvm::isa<IntegerType>(type) &&
+      !llvm::cast<IntegerType>(type).isSignless())
+    return emitOpError("integer return type must be signless");
+  // Any float or integers attribute are acceptable.
+  if (!llvm::isa<IntegerAttr, FloatAttr>(getValue())) {
+    return emitOpError("value must be an integer or float attribute");
+  }
+
+  return success();
+}
+
+OpFoldResult calyx::ConstantOp::fold(FoldAdaptor adaptor) {
+  return getValueAttr();
+}
+
+void calyx::ConstantOp::build(OpBuilder &builder, OperationState &state,
+                              StringRef symName, Attribute attr, Type type) {
+  state.addAttribute(SymbolTable::getSymbolAttrName(),
+                     builder.getStringAttr(symName));
+  state.addAttribute("value", attr);
+  SmallVector<Type> types;
+  types.push_back(type); // Out
+  state.addTypes(types);
+}
+
+SmallVector<StringRef> ConstantOp::portNames() { return {"out"}; }
+
+SmallVector<Direction> ConstantOp::portDirections() { return {Output}; }
+
+SmallVector<DictionaryAttr> ConstantOp::portAttributes() {
+  return {DictionaryAttr::get(getContext())};
+}
+
+bool ConstantOp::isCombinational() { return true; }
+
+//===----------------------------------------------------------------------===//
 // RegisterOp
 //===----------------------------------------------------------------------===//
 
@@ -2616,6 +2702,30 @@ ParseResult InvokeOp::parse(OpAsmParser &parser, OperationState &result) {
     return failure();
   FlatSymbolRefAttr callee = FlatSymbolRefAttr::get(componentName);
   SMLoc loc = parser.getCurrentLocation();
+
+  SmallVector<Attribute, 4> refCells;
+  if (succeeded(parser.parseOptionalLSquare())) {
+    if (parser.parseCommaSeparatedList([&]() -> ParseResult {
+          std::string refCellName;
+          std::string externalMem;
+          NamedAttrList refCellAttr;
+          if (parser.parseKeywordOrString(&refCellName) ||
+              parser.parseEqual() || parser.parseKeywordOrString(&externalMem))
+            return failure();
+          auto externalMemAttr =
+              SymbolRefAttr::get(parser.getContext(), externalMem);
+          refCellAttr.append(StringAttr::get(parser.getContext(), refCellName),
+                             externalMemAttr);
+          refCells.push_back(
+              DictionaryAttr::get(parser.getContext(), refCellAttr));
+          return success();
+        }) ||
+        parser.parseRSquare())
+      return failure();
+  }
+  result.addAttribute("refCellsMap",
+                      ArrayAttr::get(parser.getContext(), refCells));
+
   result.addAttribute("callee", callee);
   if (parseParameterList(parser, result, ports, inputs, portNames, inputNames,
                          types))
@@ -2632,7 +2742,19 @@ ParseResult InvokeOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 void InvokeOp::print(OpAsmPrinter &p) {
-  p << " @" << getCallee() << "(";
+  p << " @" << getCallee() << "[";
+  auto refCellNamesMap = getRefCellsMap();
+  llvm::interleaveComma(refCellNamesMap, p, [&](Attribute attr) {
+    auto dictAttr = cast<DictionaryAttr>(attr);
+    llvm::interleaveComma(dictAttr, p, [&](NamedAttribute namedAttr) {
+      auto refCellName = namedAttr.getName().str();
+      auto externalMem =
+          cast<FlatSymbolRefAttr>(namedAttr.getValue()).getValue();
+      p << refCellName << " = " << externalMem;
+    });
+  });
+  p << "](";
+
   auto ports = getPorts();
   auto inputs = getInputs();
   llvm::interleaveComma(llvm::zip(ports, inputs), p, [&](auto arg) {
@@ -2758,10 +2880,12 @@ LogicalResult InvokeOp::verify() {
     return emitOpError() << "with instance '@" << callee
                          << "', which does not exist.";
   // The argument list of invoke is empty.
-  if (getInputs().empty())
+  if (getInputs().empty() && getRefCellsMap().empty()) {
     return emitOpError() << "'@" << callee
-                         << "' has zero input and output port connections; "
+                         << "' has zero input and output port connections and "
+                            "has no passing-by-reference cells; "
                             "expected at least one.";
+  }
   size_t goPortNum = 0, donePortNum = 0;
   // They both have a go port and a done port, but the "go" port for
   // registers and memrey should be "write_en" port.

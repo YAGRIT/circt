@@ -52,6 +52,7 @@ void ExternalizeRegistersPass::runOnOperation() {
   DenseMap<StringAttr, SmallVector<StringAttr>> addedInputNames;
   DenseMap<StringAttr, SmallVector<Type>> addedOutputs;
   DenseMap<StringAttr, SmallVector<StringAttr>> addedOutputNames;
+  DenseMap<StringAttr, SmallVector<Attribute>> initialValues;
 
   // Iterate over all instances in the instance graph. This ensures we visit
   // every module, even private top modules (private and never instantiated).
@@ -93,9 +94,30 @@ void ExternalizeRegistersPass::runOnOperation() {
             regOp.emitError("registers with reset signals not yet supported");
             return signalPassFailure();
           }
-          if (regOp.getInitialValue()) {
-            regOp.emitError("registers with initial values not yet supported");
-            return signalPassFailure();
+          mlir::Attribute initState;
+          if (auto initVal = regOp.getInitialValue()) {
+            // Find the constant op that defines the reset value in an initial
+            // block (if it exists)
+            if (!initVal.getDefiningOp<seq::InitialOp>()) {
+              regOp.emitError("registers with initial values not directly "
+                              "defined by a seq.initial op not yet supported");
+              return signalPassFailure();
+            }
+            if (auto constantOp = circt::seq::unwrapImmutableValue(initVal)
+                                      .getDefiningOp<hw::ConstantOp>()) {
+              // Fetch value from constant op - leave removing the dead op to
+              // DCE
+              initState = constantOp.getValueAttr();
+            } else {
+              regOp.emitError("registers with initial values not directly "
+                              "defined by a hw.constant op in a seq.initial op "
+                              "not yet supported");
+              return signalPassFailure();
+            }
+          } else {
+            // If there's no initial value just add a unit attribute to maintain
+            // one-to-one correspondence with module ports
+            initState = mlir::UnitAttr::get(&getContext());
           }
           addedInputs[module.getSymNameAttr()].push_back(regOp.getType());
           addedOutputs[module.getSymNameAttr()].push_back(
@@ -114,6 +136,7 @@ void ExternalizeRegistersPass::runOnOperation() {
           }
           addedInputNames[module.getSymNameAttr()].push_back(newInputName);
           addedOutputNames[module.getSymNameAttr()].push_back(newOutputName);
+          initialValues[module.getSymNameAttr()].push_back(initState);
 
           regOp.getResult().replaceAllUsesWith(
               module.appendInput(newInputName, regOp.getType()).second);
@@ -136,11 +159,12 @@ void ExternalizeRegistersPass::runOnOperation() {
           addedInputNames[module.getSymNameAttr()].append(newInputNames);
           addedOutputs[module.getSymNameAttr()].append(newOutputs);
           addedOutputNames[module.getSymNameAttr()].append(newOutputNames);
-          SmallVector<Attribute> argNames(instanceOp.getArgNamesAttr().begin(),
-                                          instanceOp.getArgNamesAttr().end());
+          initialValues[module.getSymNameAttr()].append(
+              initialValues[instanceOp.getModuleNameAttr().getAttr()]);
+          SmallVector<Attribute> argNames(
+              instanceOp.getInputNames().getValue());
           SmallVector<Attribute> resultNames(
-              instanceOp.getResultNamesAttr().begin(),
-              instanceOp.getResultNamesAttr().end());
+              instanceOp.getOutputNames().getValue());
 
           for (auto [input, name] : zip_equal(newInputs, newInputNames)) {
             instanceOp.getInputsMutable().append(
@@ -156,7 +180,8 @@ void ExternalizeRegistersPass::runOnOperation() {
               instanceOp.getLoc(), resTypes, instanceOp.getInstanceNameAttr(),
               instanceOp.getModuleNameAttr(), instanceOp.getInputs(),
               builder.getArrayAttr(argNames), builder.getArrayAttr(resultNames),
-              instanceOp.getParametersAttr(), instanceOp.getInnerSymAttr());
+              instanceOp.getParametersAttr(), instanceOp.getInnerSymAttr(),
+              instanceOp.getDoNotPrintAttr());
           for (auto [output, name] :
                zip(newInst->getResults().take_back(newOutputs.size()),
                    newOutputNames))
@@ -173,6 +198,10 @@ void ExternalizeRegistersPass::runOnOperation() {
       module->setAttr(
           "num_regs",
           IntegerAttr::get(IntegerType::get(&getContext(), 32), numRegs));
+
+      module->setAttr("initial_values",
+                      ArrayAttr::get(&getContext(),
+                                     initialValues[module.getSymNameAttr()]));
     }
   }
 }
