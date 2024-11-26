@@ -554,19 +554,36 @@ struct RvalueExprVisitor {
         // Handle expressions.
         if (!listExpr->type->isSimpleBitVector()) {
           if (listExpr->type->isUnpackedArray()) {
+            if (listExpr->type->isFixedSize()) {
+              auto arrayType = dyn_cast<moore::UnpackedArrayType>(context.convertType(*listExpr->type));
+              auto elementType = arrayType.getElementType();
+              auto elementSize = elementType.getBitSize().value();
+              auto& type = listExpr->type->as<slang::ast::FixedSizeUnpackedArrayType>();
+              auto lower = type.getFixedRange().lower();
+              auto upper = type.getFixedRange().upper();
+              for (size_t i = lower; i <= upper; i++) {
+                auto value = context.convertRvalueExpression(*listExpr);
+                auto elemValue = builder.create<moore::ExtractOp>(loc, elementType, value, i);
+                cond = builder.create<moore::EqOp>(loc, lhs, elemValue);
+                conditions.push_back(cond); //TODO double cond
+              }
+            } else {
+              mlir::emitError(
+                  loc, "unsized unpacked arrays in 'inside' expressions not supported");
+              return {};
+            }
+          } else {
             mlir::emitError(
-                loc, "unpacked arrays in 'inside' expressions not supported");
+                loc, "only simple bit vectors supported in 'inside' expressions");
             return {};
           }
-          mlir::emitError(
-              loc, "only simple bit vectors supported in 'inside' expressions");
-          return {};
+        } else {
+          auto value = context.convertToSimpleBitVector(
+              context.convertRvalueExpression(*listExpr));
+          if (!value)
+            return {};
+          cond = builder.create<moore::WildcardEqOp>(loc, lhs, value);
         }
-        auto value = context.convertToSimpleBitVector(
-            context.convertRvalueExpression(*listExpr));
-        if (!value)
-          return {};
-        cond = builder.create<moore::WildcardEqOp>(loc, lhs, value);
       }
       conditions.push_back(cond);
     }
