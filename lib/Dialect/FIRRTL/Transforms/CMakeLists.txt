@@ -1,6 +1,7 @@
 add_circt_dialect_library(CIRCTFIRRTLTransforms
-  AssignOutputDirs.cpp
   AddSeqMemPorts.cpp
+  AdvancedLayerSink.cpp
+  AssignOutputDirs.cpp
   BlackBoxReader.cpp
   CheckCombLoops.cpp
   CheckLayers.cpp
@@ -11,7 +12,6 @@ add_circt_dialect_library(CIRCTFIRRTLTransforms
   DropConst.cpp
   DropName.cpp
   EliminateWires.cpp
-  EmitOMIR.cpp
   ExpandWhens.cpp
   ExtractInstances.cpp
   FinalizeIR.cpp
@@ -47,7 +47,6 @@ add_circt_dialect_library(CIRCTFIRRTLTransforms
   ModuleInliner.cpp
   ModuleSummary.cpp
   PassiveWires.cpp
-  PrefixModules.cpp
   PrintFIRRTLFieldSource.cpp
   PrintInstanceGraph.cpp
   PrintNLATable.cpp

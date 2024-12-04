@@ -13,13 +13,15 @@
 #ifndef CIRCT_DIALECT_SIM_SIMOPS_TD
 #define CIRCT_DIALECT_SIM_SIMOPS_TD
 
-include "mlir/Interfaces/SideEffectInterfaces.td"
-include "mlir/Interfaces/FunctionInterfaces.td"
-include "circt/Dialect/Sim/SimDialect.td"
-include "circt/Dialect/Sim/SimTypes.td"
-include "circt/Dialect/Seq/SeqTypes.td"
 include "circt/Dialect/HW/HWOpInterfaces.td"
 include "circt/Dialect/HW/HWTypes.td"
+include "circt/Dialect/Seq/SeqTypes.td"
+include "circt/Dialect/Sim/SimDialect.td"
+include "circt/Dialect/Sim/SimTypes.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/IR/OpAsmInterface.td"
 
 class SimOp<string mnemonic, list<Trait> traits = []> :
     Op<SimDialect, mnemonic, traits>;
@@ -148,7 +150,7 @@ def DPICallOp : SimOp<"func.dpi.call",
 }
 
 def FormatLitOp : SimOp<"fmt.lit", [Pure, ConstantLike]> {
-  let summary = "Literal string token";
+  let summary = "Literal string fragment";
   let description = [{
     Creates a constant, raw ASCII string literal for formatted printing.
     The given string attribute will be outputted as is,
@@ -278,7 +280,6 @@ def FormatCharOp : SimOp<"fmt.char", [Pure]> {
 
 def FormatStringConcatOp : SimOp<"fmt.concat", [Pure]> {
   let summary = "Concatenate format strings";
-
   let description = [{
     Concatenates an arbitrary number of format strings from
     left to right. If the argument list is empty, the empty string
@@ -287,7 +288,6 @@ def FormatStringConcatOp : SimOp<"fmt.concat", [Pure]> {
     Concatenations must not be recursive. I.e., a concatenated string should
     not contain itself directly or indirectly.
   }];
-
 
   let arguments = (ins Variadic<FormatStringType>:$inputs);
   let results = (outs FormatStringType:$result);
@@ -300,7 +300,7 @@ def FormatStringConcatOp : SimOp<"fmt.concat", [Pure]> {
 
   let extraClassDeclaration = [{
     /// Returns true iff all of the input strings are primitive
-    /// (i.e. non-concatenated) tokens or block arguments.
+    /// (i.e. non-concatenated) fragments or block arguments.
     bool isFlat() {
       return llvm::none_of(getInputs(), [](Value operand) {
         return !!operand.getDefiningOp<circt::sim::FormatStringConcatOp>();
@@ -319,12 +319,6 @@ def FormatStringConcatOp : SimOp<"fmt.concat", [Pure]> {
     /// and flattening continues without recursing into the cycle.
     LogicalResult getFlattenedInputs(llvm::SmallVectorImpl<Value> &flatOperands);
   }];
-
-  let builders = [
-    OpBuilder<(ins "mlir::ValueRange":$inputs), [{
-      return build($_builder, $_state, circt::sim::FormatStringType::get($_builder.getContext()), inputs);
-    }]>
-  ];
 }
 
 def PrintFormattedOp : SimOp<"print"> {

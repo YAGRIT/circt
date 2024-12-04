@@ -26,7 +26,6 @@
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
@@ -48,7 +47,6 @@ using llvm::SmallDenseSet;
 using llvm::SmallSetVector;
 using mlir::FailureOr;
 using mlir::InferTypeOpInterface;
-using mlir::WalkOrder;
 
 using namespace circt;
 using namespace firrtl;
@@ -1190,8 +1188,7 @@ LogicalResult InferResetsPass::updateReset(ResetNetwork net, ResetKind kind) {
     for (auto arg : module.getArguments())
       argTypes.push_back(TypeAttr::get(arg.getType()));
 
-    module->setAttr(FModuleLike::getPortTypesAttrName(),
-                    ArrayAttr::get(op->getContext(), argTypes));
+    module.setPortTypesAttr(ArrayAttr::get(op->getContext(), argTypes));
     LLVM_DEBUG(llvm::dbgs()
                << "- Updated type of module '" << module.getName() << "'\n");
   }
@@ -1205,8 +1202,7 @@ LogicalResult InferResetsPass::updateReset(ResetNetwork net, ResetKind kind) {
     for (auto type : instOp.getResultTypes())
       types.push_back(TypeAttr::get(type));
 
-    module->setAttr(FModuleLike::getPortTypesAttrName(),
-                    ArrayAttr::get(module->getContext(), types));
+    module.setPortTypesAttr(ArrayAttr::get(module->getContext(), types));
     LLVM_DEBUG(llvm::dbgs()
                << "- Updated type of extmodule '" << module.getName() << "'\n");
   }
@@ -1684,6 +1680,14 @@ LogicalResult InferResetsPass::implementFullReset(FModuleOp module,
                << "- Skipping because module explicitly has no domain\n");
     return success();
   }
+
+  // Add an annotation indicating that this module belongs to a reset domain.
+  auto *context = module.getContext();
+  AnnotationSet annotations(module);
+  annotations.addAnnotations(DictionaryAttr::get(
+      context, NamedAttribute(StringAttr::get(context, "class"),
+                              StringAttr::get(context, fullResetAnnoClass))));
+  annotations.applyToOperation(module);
 
   // If needed, add a reset port to the module.
   Value actualReset = domain.existingValue;

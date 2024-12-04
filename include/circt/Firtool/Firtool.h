@@ -52,7 +52,6 @@ public:
   }
 
   StringRef getOutputFilename() const { return outputFilename; }
-  StringRef getOmirOutputFile() const { return omirOutFile; }
   StringRef getBlackBoxRootPath() const { return blackBoxRootPath; }
   StringRef getChiselInterfaceOutputDirectory() const {
     return chiselInterfaceOutDirectory;
@@ -98,11 +97,11 @@ public:
   bool shouldConvertProbesToSignals() const { return probesToSignals; }
   bool shouldReplaceSequentialMemories() const { return replSeqMem; }
   bool shouldDisableOptimization() const { return disableOptimization; }
+  bool shouldAdvancedLayerSink() const { return advancedLayerSink; }
   bool shouldLowerMemories() const { return lowerMemories; }
   bool shouldDedup() const { return !noDedup; }
   bool shouldEnableDebugInfo() const { return enableDebugInfo; }
   bool shouldIgnoreReadEnableMemories() const { return ignoreReadEnableMem; }
-  bool shouldEmitOMIR() const { return emitOMIR; }
   bool shouldExportChiselInterface() const { return exportChiselInterface; }
   bool shouldConvertVecOfBundle() const { return vbToBV; }
   bool shouldEtcDisableInstanceExtraction() const {
@@ -132,6 +131,7 @@ public:
   bool shouldExtractTestCode() const { return extractTestCode; }
   bool shouldFixupEICGWrapper() const { return fixupEICGWrapper; }
   bool shouldAddCompanionAssume() const { return addCompanionAssume; }
+  bool shouldDisableCSEinClasses() const { return disableCSEinClasses; }
 
   // Setters, used by the CAPI
   FirtoolOptions &setOutputFilename(StringRef name) {
@@ -221,13 +221,8 @@ public:
     return *this;
   }
 
-  FirtoolOptions &setEmitOMIR(bool value) {
-    emitOMIR = value;
-    return *this;
-  }
-
-  FirtoolOptions &setOmirOutFile(StringRef value) {
-    omirOutFile = value;
+  FirtoolOptions &setAdvancedLayerSink(bool value) {
+    advancedLayerSink = value;
     return *this;
   }
 
@@ -362,6 +357,11 @@ public:
     return *this;
   }
 
+  FirtoolOptions &setDisableCSEinClasses(bool value) {
+    disableCSEinClasses = value;
+    return *this;
+  }
+
 private:
   std::string outputFilename;
   bool disableAnnotationsUnknown;
@@ -380,8 +380,7 @@ private:
   bool noDedup;
   firrtl::CompanionMode companionMode;
   bool disableAggressiveMergeConnections;
-  bool emitOMIR;
-  std::string omirOutFile;
+  bool advancedLayerSink;
   bool lowerMemories;
   std::string blackBoxRootPath;
   bool replSeqMem;
@@ -409,6 +408,7 @@ private:
   bool stripDebugInfo;
   bool fixupEICGWrapper;
   bool addCompanionAssume;
+  bool disableCSEinClasses;
 };
 
 void registerFirtoolCLOptions();

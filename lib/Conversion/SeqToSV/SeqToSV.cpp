@@ -177,8 +177,13 @@ public:
       rewriter.create<sv::PAssignOp>(loc, svReg, adaptor.getResetValue());
     };
 
+    // Registers written in an `always_ff` process may not have any assignments
+    // outside of that process.
+    // For some tools this also prohibits inititalization.
+    bool mayLowerToAlwaysFF = lowerToAlwaysFF && !reg.getInitialValue();
+
     if (adaptor.getReset() && adaptor.getResetValue()) {
-      if (lowerToAlwaysFF) {
+      if (mayLowerToAlwaysFF) {
         rewriter.create<sv::AlwaysFFOp>(
             loc, sv::EventControl::AtPosEdge, adaptor.getClk(),
             sv::ResetType::SyncReset, sv::EventControl::AtPosEdge,
@@ -191,7 +196,7 @@ public:
             });
       }
     } else {
-      if (lowerToAlwaysFF) {
+      if (mayLowerToAlwaysFF) {
         rewriter.create<sv::AlwaysFFOp>(loc, sv::EventControl::AtPosEdge,
                                         adaptor.getClk(), assignValue);
       } else {
@@ -405,29 +410,25 @@ struct SeqToSVTypeConverter : public TypeConverter {
       return arrayTy;
     });
 
-    addTargetMaterialization(
-        [&](mlir::OpBuilder &builder, mlir::Type resultType,
-            mlir::ValueRange inputs,
-            mlir::Location loc) -> std::optional<mlir::Value> {
-          if (inputs.size() != 1)
-            return std::nullopt;
-          return builder
-              .create<mlir::UnrealizedConversionCastOp>(loc, resultType,
-                                                        inputs[0])
-              ->getResult(0);
-        });
+    addTargetMaterialization([&](mlir::OpBuilder &builder,
+                                 mlir::Type resultType, mlir::ValueRange inputs,
+                                 mlir::Location loc) -> mlir::Value {
+      if (inputs.size() != 1)
+        return Value();
+      return builder
+          .create<mlir::UnrealizedConversionCastOp>(loc, resultType, inputs[0])
+          ->getResult(0);
+    });
 
-    addSourceMaterialization(
-        [&](mlir::OpBuilder &builder, mlir::Type resultType,
-            mlir::ValueRange inputs,
-            mlir::Location loc) -> std::optional<mlir::Value> {
-          if (inputs.size() != 1)
-            return std::nullopt;
-          return builder
-              .create<mlir::UnrealizedConversionCastOp>(loc, resultType,
-                                                        inputs[0])
-              ->getResult(0);
-        });
+    addSourceMaterialization([&](mlir::OpBuilder &builder,
+                                 mlir::Type resultType, mlir::ValueRange inputs,
+                                 mlir::Location loc) -> mlir::Value {
+      if (inputs.size() != 1)
+        return Value();
+      return builder
+          .create<mlir::UnrealizedConversionCastOp>(loc, resultType, inputs[0])
+          ->getResult(0);
+    });
   }
 };
 
@@ -464,6 +465,28 @@ public:
                   ConversionPatternRewriter &rewriter) const final {
     rewriter.replaceOpWithNewOp<hw::ConstantOp>(
         clockConst, APInt(1, clockConst.getValue() == ClockConst::High));
+    return success();
+  }
+};
+
+class AggregateConstantPattern
+    : public OpConversionPattern<hw::AggregateConstantOp> {
+public:
+  using OpConversionPattern<hw::AggregateConstantOp>::OpConversionPattern;
+  using OpConversionPattern<hw::AggregateConstantOp>::OpAdaptor;
+
+  LogicalResult
+  matchAndRewrite(hw::AggregateConstantOp aggregateConstant, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const final {
+    auto newType = typeConverter->convertType(aggregateConstant.getType());
+    auto newAttr = aggregateConstant.getFieldsAttr().replace(
+        [](seq::ClockConstAttr clockConst) {
+          return mlir::IntegerAttr::get(
+              mlir::IntegerType::get(clockConst.getContext(), 1),
+              APInt(1, clockConst.getValue() == ClockConst::High));
+        });
+    rewriter.replaceOpWithNewOp<hw::AggregateConstantOp>(
+        aggregateConstant, newType, cast<ArrayAttr>(newAttr));
     return success();
   }
 };
@@ -546,6 +569,15 @@ static bool isLegalOp(Operation *op) {
         return false;
     return true;
   }
+
+  if (auto hwAggregateConstantOp = dyn_cast<hw::AggregateConstantOp>(op)) {
+    bool foundClockAttr = false;
+    hwAggregateConstantOp.getFieldsAttr().walk(
+        [&](seq::ClockConstAttr attr) { foundClockAttr = true; });
+    if (foundClockAttr)
+      return false;
+  }
+
   bool allOperandsLowered = llvm::all_of(
       op->getOperands(), [](auto op) { return isLegalType(op.getType()); });
   bool allResultsLowered = llvm::all_of(op->getResults(), [](auto result) {
@@ -666,6 +698,7 @@ void SeqToSVPass::runOnOperation() {
   patterns.add<ClockDividerLowering>(typeConverter, context);
   patterns.add<ClockConstLowering>(typeConverter, context);
   patterns.add<TypeConversionPattern>(typeConverter, context);
+  patterns.add<AggregateConstantPattern>(typeConverter, context);
 
   if (failed(applyPartialConversion(circuit, target, std::move(patterns))))
     signalPassFailure();

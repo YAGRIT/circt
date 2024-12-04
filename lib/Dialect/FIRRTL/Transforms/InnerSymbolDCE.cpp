@@ -9,9 +9,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "circt/Dialect/FIRRTL/FIRRTLOps.h"
+#include "circt/Dialect/FIRRTL/FIRRTLOpInterfaces.h"
 #include "circt/Dialect/FIRRTL/Passes.h"
 #include "circt/Dialect/HW/HWAttributes.h"
+#include "circt/Dialect/HW/InnerSymbolTable.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Threading.h"
 #include "mlir/Pass/Pass.h"
@@ -44,7 +45,7 @@ static void dropSymbol(const InnerSymTarget &target) {
     auto mod = cast<FModuleLike>(target.getOp());
     assert(target.getPort() < mod.getNumPorts());
     auto base = mod.getPortSymbolAttr(target.getPort());
-    cast<firrtl::FModuleLike>(*mod).setPortSymbolsAttr(
+    cast<firrtl::FModuleLike>(*mod).setPortSymbolAttr(
         target.getPort(), base.erase(target.getField()));
     return;
   }

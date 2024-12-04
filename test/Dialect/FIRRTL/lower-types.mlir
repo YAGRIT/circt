@@ -43,8 +43,8 @@ firrtl.circuit "TopLevel" {
   // COMMON-SAME: out %sink_data: [[SINK_DATA_TYPE:!firrtl.uint<64>]]
   firrtl.module @TopLevel(in %source: !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>,
                           out %sink: !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>) {
-    // SIG: %source = firrtl.wire interesting_name : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>> 
-    // SIG: %sink = firrtl.wire interesting_name : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>> 
+    // SIG: %source = firrtl.wire interesting_name : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>
+    // SIG: %sink = firrtl.wire interesting_name : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>
     // COMMON: %inst_source_valid, %inst_source_ready, %inst_source_data, %inst_sink_valid, %inst_sink_ready, %inst_sink_data
     // COMMON-SAME: = firrtl.instance "" @Simple(
     // COMMON-SAME: in source_valid: !firrtl.uint<1>, out source_ready: !firrtl.uint<1>, in source_data: !firrtl.uint<64>, out sink_valid: !firrtl.uint<1>, in sink_ready: !firrtl.uint<1>, out sink_data: !firrtl.uint<64>
@@ -758,8 +758,8 @@ firrtl.circuit "TopLevel" {
 //     b <= a[sel][sel]
 
   firrtl.module private @multidimRead(
-    in %a: !firrtl.vector<vector<uint<2>, 2>, 2>, 
-    in %sel: !firrtl.uint<2>, 
+    in %a: !firrtl.vector<vector<uint<2>, 2>, 2>,
+    in %sel: !firrtl.uint<2>,
     out %b: !firrtl.uint<2>) {
     %0 = firrtl.subaccess %a[%sel] : !firrtl.vector<vector<uint<2>, 2>, 2>, !firrtl.uint<2>
     %1 = firrtl.subaccess %0[%sel] : !firrtl.vector<uint<2>, 2>, !firrtl.uint<2>
@@ -915,9 +915,9 @@ firrtl.circuit "TopLevel" {
 // Handle zero-length vector subaccess
   // CHECK-LABEL: zvec
   firrtl.module private @zvec(
-      in %i: !firrtl.vector<bundle<a: uint<8>, b: uint<4>>, 0>, 
-      in %sel: !firrtl.uint<1>, 
-      out %foo: !firrtl.vector<uint<1>, 0>, 
+      in %i: !firrtl.vector<bundle<a: uint<8>, b: uint<4>>, 0>,
+      in %sel: !firrtl.uint<1>,
+      out %foo: !firrtl.vector<uint<1>, 0>,
       out %o: !firrtl.uint<8>)
     {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
@@ -1002,9 +1002,9 @@ firrtl.module private @is1436_FOO() {
     // CHECK-NEXT:  %[[v1:.+]] = firrtl.bits %a1 3 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<2>
     // CHECK-NEXT:  %[[v2:.+]] = firrtl.cat %[[v1]], %[[v0]] : (!firrtl.uint<2>, !firrtl.uint<2>) -> !firrtl.uint<4>
     %c = firrtl.bitcast %b : (!firrtl.vector<uint<2>, 2>) -> (!firrtl.bundle<valid: uint<1>, ready: uint<1>, data: uint<2>>)
-    // CHECK-NEXT:  %[[v3:.+]] = firrtl.bits %[[v2]] 0 to 0 : (!firrtl.uint<4>) -> !firrtl.uint<1>
-    // CHECK-NEXT:  %[[v4:.+]] = firrtl.bits %[[v2]] 1 to 1 : (!firrtl.uint<4>) -> !firrtl.uint<1>
-    // CHECK-NEXT:  %[[v5:.+]] = firrtl.bits %[[v2]] 3 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<2>
+    // CHECK-NEXT:  %[[v3:.+]] = firrtl.bits %[[v2]] 3 to 3 : (!firrtl.uint<4>) -> !firrtl.uint<1>
+    // CHECK-NEXT:  %[[v4:.+]] = firrtl.bits %[[v2]] 2 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<1>
+    // CHECK-NEXT:  %[[v5:.+]] = firrtl.bits %[[v2]] 1 to 0 : (!firrtl.uint<4>) -> !firrtl.uint<2>
     %d = firrtl.wire : !firrtl.bundle<valid: uint<1>, ready: uint<1>, data: uint<2>>
     // CHECK-NEXT:  %d_valid = firrtl.wire  : !firrtl.uint<1>
     // CHECK-NEXT:  %d_ready = firrtl.wire  : !firrtl.uint<1>
@@ -1014,10 +1014,10 @@ firrtl.module private @is1436_FOO() {
     // CHECK-NEXT:  firrtl.matchingconnect %d_ready, %[[v4]] : !firrtl.uint<1>
     // CHECK-NEXT:  firrtl.matchingconnect %d_data, %[[v5]] : !firrtl.uint<2>
     %e = firrtl.bitcast %d : (!firrtl.bundle<valid: uint<1>, ready: uint<1>, data: uint<2>>) -> (!firrtl.bundle<addr: uint<2>, data : vector<uint<1>, 2>>)
-    // CHECK-NEXT:  %[[v6:.+]] = firrtl.cat %d_ready, %d_valid : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<2>
-    // CHECK-NEXT:  %[[v7:.+]] = firrtl.cat %d_data, %[[v6]] : (!firrtl.uint<2>, !firrtl.uint<2>) -> !firrtl.uint<4>
-    // CHECK-NEXT:  %[[v8:.+]] = firrtl.bits %[[v7]] 1 to 0 : (!firrtl.uint<4>) -> !firrtl.uint<2>
-    // CHECK-NEXT:  %[[v9:.+]] = firrtl.bits %[[v7]] 3 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<2>
+    // CHECK-NEXT:  %[[v6:.+]] = firrtl.cat %d_valid, %d_ready : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<2>
+    // CHECK-NEXT:  %[[v7:.+]] = firrtl.cat %[[v6]], %d_data : (!firrtl.uint<2>, !firrtl.uint<2>) -> !firrtl.uint<4>
+    // CHECK-NEXT:  %[[v8:.+]] = firrtl.bits %[[v7]] 3 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<2>
+    // CHECK-NEXT:  %[[v9:.+]] = firrtl.bits %[[v7]] 1 to 0 : (!firrtl.uint<4>) -> !firrtl.uint<2>
   %o1 = firrtl.subfield %e[data] : !firrtl.bundle<addr: uint<2>, data : vector<uint<1>, 2>>
    %c2 = firrtl.bitcast %a1 : (!firrtl.uint<4>) -> (!firrtl.bundle<valid: bundle<re: bundle<a: uint<1>>, aa: uint<1>>, ready: uint<1>, data: uint<1>>)
     %d2 = firrtl.wire : !firrtl.bundle<valid: bundle<re: bundle<a: uint<1>>, aa: uint<1>>, ready: uint<1>, data: uint<1>>
@@ -1025,12 +1025,12 @@ firrtl.module private @is1436_FOO() {
     uint<1>>, !firrtl.bundle<valid: bundle<re: bundle<a: uint<1>>, aa: uint<1>>, ready: uint<1>, data: uint<1>>
    //CHECK: %[[v10:.+]] = firrtl.bits %[[v9]] 0 to 0 : (!firrtl.uint<2>) -> !firrtl.uint<1>
    //CHECK: %[[v11:.+]] = firrtl.bits %[[v9]] 1 to 1 : (!firrtl.uint<2>) -> !firrtl.uint<1>
-   //CHECK: %[[v12:.+]] = firrtl.bits %a1 1 to 0 : (!firrtl.uint<4>) -> !firrtl.uint<2>
-   //CHECK: %[[v13:.+]] = firrtl.bits %[[v12]] 0 to 0 : (!firrtl.uint<2>) -> !firrtl.uint<1>
+   //CHECK: %[[v12:.+]] = firrtl.bits %a1 3 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<2>
+   //CHECK: %[[v13:.+]] = firrtl.bits %[[v12]] 1 to 1 : (!firrtl.uint<2>) -> !firrtl.uint<1>
    //CHECK: %[[v14:.+]] = firrtl.bits %[[v13]] 0 to 0 : (!firrtl.uint<1>) -> !firrtl.uint<1>
-   //CHECK: %[[v15:.+]] = firrtl.bits %[[v12]] 1 to 1 : (!firrtl.uint<2>) -> !firrtl.uint<1>
-   //CHECK: %[[v16:.+]] = firrtl.bits %a1 2 to 2 : (!firrtl.uint<4>) -> !firrtl.uint<1>
-   //CHECK: %[[v17:.+]] = firrtl.bits %a1 3 to 3 : (!firrtl.uint<4>) -> !firrtl.uint<1>
+   //CHECK: %[[v15:.+]] = firrtl.bits %[[v12]] 0 to 0 : (!firrtl.uint<2>) -> !firrtl.uint<1>
+   //CHECK: %[[v16:.+]] = firrtl.bits %a1 1 to 1 : (!firrtl.uint<4>) -> !firrtl.uint<1>
+   //CHECK: %[[v17:.+]] = firrtl.bits %a1 0 to 0 : (!firrtl.uint<4>) -> !firrtl.uint<1>
    //CHECK: %[[d2_valid_re_a:.+]] = firrtl.wire  : !firrtl.uint<1>
    //CHECK: %[[d2_valid_aa:.+]] = firrtl.wire  : !firrtl.uint<1>
    //CHECK: %[[d2_ready:.+]] = firrtl.wire  : !firrtl.uint<1>
@@ -1402,5 +1402,23 @@ firrtl.circuit "UnrealizedConversion" {
     %b = builtin.unrealized_conversion_cast %a : !hw.struct<data: i64, tag: i1> to !firrtl.bundle<data: uint<64>, tag: uint<1>>
     %w = firrtl.wire : !firrtl.bundle<data: uint<64>, tag: uint<1>>
     firrtl.matchingconnect %w, %b : !firrtl.bundle<data: uint<64>, tag: uint<1>>
+  }
+}
+
+// Test that memories have their prefixes copied when lowering.
+// See: https://github.com/llvm/circt/issues/7835
+firrtl.circuit "MemoryPrefixCopying" {
+  // COMMON-LABEL: firrtl.module @MemoryPrefixCopying
+  firrtl.module @MemoryPrefixCopying() {
+    // COMMON:      firrtl.mem
+    // COMMON-SAME:   prefix = "Foo_"
+    %mem_r = firrtl.mem Undefined {
+      depth = 64 : i64,
+      name = "ram",
+      portNames = ["r"],
+      prefix = "Foo_",
+      readLatency = 1 : i32,
+      writeLatency = 1 : i32
+    } : !firrtl.bundle<addr: uint<6>, en: uint<1>, clk: clock, data flip: vector<uint<8>, 1>>
   }
 }

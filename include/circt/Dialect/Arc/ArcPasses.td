@@ -59,7 +59,7 @@ def Dedup : Pass<"arc-dedup", "mlir::ModuleOp"> {
 }
 
 def PrintCostModel : Pass<"arc-print-cost-model", "mlir::ModuleOp"> {
-  let summary = "A dymmy pass to test analysis passes";
+  let summary = "A dummy pass to test analysis passes";
   let constructor = "circt::arc::createPrintCostModelPass()";
   let dependentDialects = ["arc::ArcDialect"];
   let statistics = [
@@ -90,13 +90,6 @@ def FindInitialVectors : Pass<"arc-find-initial-vectors", "mlir::ModuleOp"> {
     Statistic<"numOfVectorsCreated", "numOfVectorsCreated",
       "Total number of VectorizeOps the pass inserted">,
   ];
-}
-
-def GroupResetsAndEnables : Pass<"arc-group-resets-and-enables",
-                                 "mlir::ModuleOp"> {
-  let summary = "Group reset and enable conditions of lowered states";
-  let constructor = "circt::arc::createGroupResetsAndEnablesPass()";
-  let dependentDialects = ["arc::ArcDialect", "mlir::scf::SCFDialect"];
 }
 
 def InferMemories : Pass<"arc-infer-memories", "mlir::ModuleOp"> {
@@ -170,12 +163,6 @@ def LatencyRetiming : Pass<"arc-latency-retiming", "mlir::ModuleOp"> {
   ];
 }
 
-def LegalizeStateUpdate : Pass<"arc-legalize-state-update", "mlir::ModuleOp"> {
-  let summary = "Insert temporaries such that state reads don't see writes";
-  let constructor = "circt::arc::createLegalizeStateUpdatePass()";
-  let dependentDialects = ["arc::ArcDialect"];
-}
-
 def LowerArcsToFuncs : Pass<"arc-lower-arcs-to-funcs", "mlir::ModuleOp"> {
   let summary = "Lower arc definitions into functions";
   let constructor = "circt::arc::createLowerArcsToFuncsPass()";
@@ -194,12 +181,15 @@ def LowerLUT : Pass<"arc-lower-lut", "arc::DefineOp"> {
   let dependentDialects = ["hw::HWDialect", "comb::CombDialect"];
 }
 
-def LowerState : Pass<"arc-lower-state", "mlir::ModuleOp"> {
+def LowerStatePass : Pass<"arc-lower-state", "mlir::ModuleOp"> {
   let summary = "Split state into read and write ops grouped by clock tree";
-  let constructor = "circt::arc::createLowerStatePass()";
   let dependentDialects = [
-    "arc::ArcDialect", "mlir::scf::SCFDialect", "mlir::func::FuncDialect",
-    "mlir::LLVM::LLVMDialect", "comb::CombDialect", "seq::SeqDialect"
+    "arc::ArcDialect",
+    "comb::CombDialect",
+    "mlir::LLVM::LLVMDialect",
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect",
+    "seq::SeqDialect",
   ];
 }
 
@@ -280,6 +270,31 @@ def MakeTables : Pass<"arc-make-tables", "mlir::ModuleOp"> {
   let summary = "Transform appropriate arc logic into lookup tables";
   let constructor = "circt::arc::createMakeTablesPass()";
   let dependentDialects = ["arc::ArcDialect"];
+}
+
+def MergeIfsPass : Pass<"arc-merge-ifs"> {
+  let summary = "Merge control flow structures";
+  let description = [{
+    This pass optimizes control flow in a few ways. It moves operations closer
+    to their earliest user, if possible sinking them into blocks if all uses are
+    nested in the same block. It merges adjacent `scf.if` operations with the
+    same condition. And it moves operations in between two `scf.if` operations
+    ahead of the first if op to allow them to be merged. The pass runs on any
+    SSACFG regions nested under the operation it is applied to.
+
+    Note that this pass assumes that `!arc.state` and `!arc.memory` values can
+    never alias. That is, different values are assumed to never point to the
+    same storage location in simulation memory.
+  }];
+  let statistics = [
+    Statistic<"numOpsSunk", "sunk", "Ops sunk into blocks">,
+    Statistic<"numOpsMovedToUser", "moved-to-user", "Ops moved to first user">,
+    Statistic<"numIfsMerged", "ifs-merged", "Adjacent scf.if ops merged">,
+    Statistic<"numOpsMovedFromBetweenIfs", "moved-from-between-ifs",
+      "Ops moved from between ifs to enable merging">,
+    Statistic<"numIterations", "iterations",
+      "Number of iterations until no more ops were sunk/merged">,
+  ];
 }
 
 def MuxToControlFlow : Pass<"arc-mux-to-control-flow", "mlir::ModuleOp"> {

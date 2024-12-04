@@ -21,8 +21,6 @@
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/TypeSwitch.h"
 
 namespace circt {
 namespace firrtl {
@@ -364,7 +362,8 @@ void LowerCHIRRTLPass::replaceMem(Operation *cmem, StringRef name,
       cmem->getAttrOfType<firrtl::NameKindEnumAttr>("nameKind").getValue(),
       annotations, memBuilder.getArrayAttr(portAnnotations),
       symOp.getInnerSymAttr(),
-      cmem->getAttrOfType<firrtl::MemoryInitAttr>("init"), StringAttr());
+      cmem->getAttrOfType<firrtl::MemoryInitAttr>("init"),
+      cmem->getAttrOfType<StringAttr>("prefix"));
   ++numCreatedMems;
 
   // Process each memory port, initializing the memory port and inferring when

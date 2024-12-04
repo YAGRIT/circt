@@ -7,13 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "circt/Dialect/FIRRTL/FIRRTLAnnotations.h"
-#include "circt/Dialect/FIRRTL/FIRRTLInstanceGraph.h"
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
 #include "circt/Dialect/FIRRTL/FIRRTLUtils.h"
 #include "circt/Dialect/FIRRTL/Passes.h"
 #include "circt/Dialect/HW/HWAttributes.h"
 #include "circt/Dialect/HW/HWOps.h"
-#include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/IR/Threading.h"
 #include "llvm/ADT/STLExtras.h"
 #include <optional>
@@ -527,8 +525,8 @@ struct SpecializeLayers {
     moduleLike.erasePorts(disabledPorts);
 
     // Update the rest of the port types.
-    moduleLike->setAttr(FModuleLike::getPortTypesAttrName(),
-                        ArrayAttr::get(moduleLike.getContext(), newTypeAttrs));
+    moduleLike.setPortTypesAttr(
+        ArrayAttr::get(moduleLike.getContext(), newTypeAttrs));
 
     // We may also need to update the types on the block arguments.
     if (auto moduleOp = dyn_cast<FModuleOp>(moduleLike.getOperation()))

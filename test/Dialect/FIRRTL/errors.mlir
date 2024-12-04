@@ -73,7 +73,7 @@ firrtl.circuit "foo" {
 "firrtl.module"() ( { }, { })
    {sym_name = "foo", convention = #firrtl<convention internal>,
     portTypes = [!firrtl.uint], portDirections = array<i1: true>,
-    portNames = ["in0"], portAnnotations = [], portSyms = []} : () -> ()
+    portNames = ["in0"], portAnnotations = [], portSymbols = []} : () -> ()
 }
 
 // -----
@@ -84,7 +84,7 @@ firrtl.circuit "foo" {
   ^entry:
 }) { sym_name = "foo", convention = #firrtl<convention internal>,
     portTypes = [!firrtl.uint], portDirections = array<i1: true>,
-    portNames = ["in0"], portAnnotations = [], portSyms = []} : () -> ()
+    portNames = ["in0"], portAnnotations = [], portSymbols = []} : () -> ()
 }
 
 // -----
@@ -95,7 +95,7 @@ firrtl.circuit "foo" {
   ^entry:
 }) {sym_name = "foo", convention = #firrtl<convention internal>,
     portTypes = [!firrtl.uint], portDirections = array<i1: true>,
-    portNames = ["in0"], portAnnotations = [], portSyms = [],
+    portNames = ["in0"], portAnnotations = [], portSymbols = [],
     portLocations = []} : () -> ()
 }
 
@@ -110,7 +110,7 @@ firrtl.circuit "foo" {
   ^entry:
 }) {sym_name = "foo", convention = #firrtl<convention internal>,
     portTypes = [!firrtl.uint], portDirections = array<i1: true>,
-    portNames = ["in0"], portAnnotations = [], portSyms = [],
+    portNames = ["in0"], portAnnotations = [], portSymbols = [],
     portLocations = [loc("loc")]} : () -> ()
 }
 
@@ -122,7 +122,7 @@ firrtl.circuit "foo" {
   ^entry(%a: i1):
 }) {sym_name = "foo", convention = #firrtl<convention internal>,
     portTypes = [!firrtl.uint], portDirections = array<i1: true>,
-    portNames = ["in0"], portAnnotations = [], portSyms = [],
+    portNames = ["in0"], portAnnotations = [], portSymbols = [],
     portLocations = [loc("foo")]} : () -> ()
 }
 
@@ -1832,6 +1832,18 @@ firrtl.circuit "ClassCannotHavePortSymbols" {
   // Not great diagnostic, but this should never happen so don't bother checking for it.
   // expected-error @below {{expected ')'}}
   firrtl.class @ClassWithPortSymbol(in %in: !firrtl.string sym @foo, in %in2 : !firrtl.string) {}
+}
+
+// -----
+
+// A bind layer cannot be nested under an inline layer as we can't lower it.
+firrtl.circuit "BindUnderInline" {
+  // expected-note @below {{layer with inline convention here}}
+  firrtl.layer @A inline {
+    // expected-error @below {{has bind convention and cannot be nested under a layer with inline convention}}
+    firrtl.layer @B bind {}
+  }
+  firrtl.module @BindUnderInline() {}
 }
 
 // -----

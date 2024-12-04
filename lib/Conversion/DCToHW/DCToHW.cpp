@@ -111,29 +111,27 @@ public:
   ESITypeConverter() {
     addConversion([](Type type) -> Type { return toESIHWType(type); });
     addConversion([](esi::ChannelType t) -> Type { return t; });
-    addTargetMaterialization(
-        [](mlir::OpBuilder &builder, mlir::Type resultType,
-           mlir::ValueRange inputs,
-           mlir::Location loc) -> std::optional<mlir::Value> {
-          if (inputs.size() != 1)
-            return std::nullopt;
+    addTargetMaterialization([](mlir::OpBuilder &builder, mlir::Type resultType,
+                                mlir::ValueRange inputs,
+                                mlir::Location loc) -> mlir::Value {
+      if (inputs.size() != 1)
+        return Value();
 
-          return builder
-              .create<UnrealizedConversionCastOp>(loc, resultType, inputs[0])
-              ->getResult(0);
-        });
+      return builder
+          .create<UnrealizedConversionCastOp>(loc, resultType, inputs[0])
+          ->getResult(0);
+    });
 
-    addSourceMaterialization(
-        [](mlir::OpBuilder &builder, mlir::Type resultType,
-           mlir::ValueRange inputs,
-           mlir::Location loc) -> std::optional<mlir::Value> {
-          if (inputs.size() != 1)
-            return std::nullopt;
+    addSourceMaterialization([](mlir::OpBuilder &builder, mlir::Type resultType,
+                                mlir::ValueRange inputs,
+                                mlir::Location loc) -> mlir::Value {
+      if (inputs.size() != 1)
+        return Value();
 
-          return builder
-              .create<UnrealizedConversionCastOp>(loc, resultType, inputs[0])
-              ->getResult(0);
-        });
+      return builder
+          .create<UnrealizedConversionCastOp>(loc, resultType, inputs[0])
+          ->getResult(0);
+    });
   }
 };
 
@@ -239,7 +237,8 @@ struct RTLBuilder {
   }
 
   Value constant(unsigned width, int64_t value, StringRef name = {}) {
-    return constant(APInt(width, value));
+    return constant(
+        APInt(width, value, /*isSigned=*/false, /*implicitTrunc=*/true));
   }
   std::pair<Value, Value> wrap(Value data, Value valid, StringRef name = {}) {
     auto wrapOp = b.create<esi::WrapValidReadyOp>(loc, data, valid);
@@ -839,10 +838,8 @@ static bool isDCType(Type type) { return isa<TokenType, ValueType>(type); }
 ///  Returns true if the given `op` is considered as legal - i.e. it does not
 ///  contain any dc-typed values.
 static bool isLegalOp(Operation *op) {
-  if (auto funcOp = dyn_cast<HWModuleLike>(op)) {
-    return llvm::none_of(funcOp.getPortTypes(), isDCType) &&
-           llvm::none_of(funcOp.getBodyBlock()->getArgumentTypes(), isDCType);
-  }
+  if (auto funcOp = dyn_cast<HWModuleLike>(op))
+    return llvm::none_of(funcOp.getPortTypes(), isDCType);
 
   bool operandsOK = llvm::none_of(op->getOperandTypes(), isDCType);
   bool resultsOK = llvm::none_of(op->getResultTypes(), isDCType);

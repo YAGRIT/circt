@@ -610,20 +610,16 @@ struct RvalueExprVisitor {
 
     // Handle left expression.
     builder.setInsertionPointToStart(&trueBlock);
-    auto trueValue = context.convertRvalueExpression(expr.left());
+    auto trueValue = context.convertRvalueExpression(expr.left(), type);
     if (!trueValue)
       return {};
-    if (trueValue.getType() != type)
-      trueValue = builder.create<moore::ConversionOp>(loc, type, trueValue);
     builder.create<moore::YieldOp>(loc, trueValue);
 
     // Handle right expression.
     builder.setInsertionPointToStart(&falseBlock);
-    auto falseValue = context.convertRvalueExpression(expr.right());
+    auto falseValue = context.convertRvalueExpression(expr.right(), type);
     if (!falseValue)
       return {};
-    if (falseValue.getType() != type)
-      falseValue = builder.create<moore::ConversionOp>(loc, type, falseValue);
     builder.create<moore::YieldOp>(loc, falseValue);
 
     return conditionalOp.getResult();
@@ -791,6 +787,76 @@ struct RvalueExprVisitor {
     return visitAssignmentPattern(expr, *count);
   }
 
+  Value visit(const slang::ast::StreamingConcatenationExpression &expr) {
+    SmallVector<Value> operands;
+    for (auto stream : expr.streams()) {
+      auto operandLoc = context.convertLocation(stream.operand->sourceRange);
+      if (!stream.constantWithWidth.has_value() && stream.withExpr) {
+        mlir::emitError(operandLoc)
+            << "Moore only support streaming "
+               "concatenation with fixed size 'with expression'";
+        return {};
+      }
+      Value value;
+      if (stream.constantWithWidth.has_value()) {
+        value = context.convertRvalueExpression(*stream.withExpr);
+        auto type = cast<moore::UnpackedType>(value.getType());
+        auto intType = moore::IntType::get(
+            context.getContext(), type.getBitSize().value(), type.getDomain());
+        // do not care if it's signed, because we will not do expansion
+        value = context.materializeConversion(intType, value, false, loc);
+      } else {
+        value = context.convertRvalueExpression(*stream.operand);
+      }
+
+      if (!value)
+        return {};
+      value = context.convertToSimpleBitVector(value);
+      if (!value) {
+        return {};
+      }
+      operands.push_back(value);
+    }
+    Value value;
+
+    if (operands.size() == 1) {
+      // There must be at least one element, otherwise slang will report an
+      // error
+      value = operands.front();
+    } else {
+      value = builder.create<moore::ConcatOp>(loc, operands).getResult();
+    }
+
+    if (expr.sliceSize == 0) {
+      return value;
+    }
+
+    auto type = cast<moore::IntType>(value.getType());
+    SmallVector<Value> slicedOperands;
+    auto iterMax = type.getWidth() / expr.sliceSize;
+    auto remainSize = type.getWidth() % expr.sliceSize;
+
+    for (size_t i = 0; i < iterMax; i++) {
+      auto extractResultType = moore::IntType::get(
+          context.getContext(), expr.sliceSize, type.getDomain());
+
+      auto extracted = builder.create<moore::ExtractOp>(
+          loc, extractResultType, value, i * expr.sliceSize);
+      slicedOperands.push_back(extracted);
+    }
+    // Handle other wire
+    if (remainSize) {
+      auto extractResultType = moore::IntType::get(
+          context.getContext(), remainSize, type.getDomain());
+
+      auto extracted = builder.create<moore::ExtractOp>(
+          loc, extractResultType, value, iterMax * expr.sliceSize);
+      slicedOperands.push_back(extracted);
+    }
+
+    return builder.create<moore::ConcatOp>(loc, slicedOperands);
+  }
+
   /// Emit an error for all other expressions.
   template <typename T>
   Value visit(T &&node) {
@@ -929,6 +995,75 @@ struct LvalueExprVisitor {
         dynLowBit);
   }
 
+  Value visit(const slang::ast::StreamingConcatenationExpression &expr) {
+    SmallVector<Value> operands;
+    for (auto stream : expr.streams()) {
+      auto operandLoc = context.convertLocation(stream.operand->sourceRange);
+      if (!stream.constantWithWidth.has_value() && stream.withExpr) {
+        mlir::emitError(operandLoc)
+            << "Moore only support streaming "
+               "concatenation with fixed size 'with expression'";
+        return {};
+      }
+      Value value;
+      if (stream.constantWithWidth.has_value()) {
+        value = context.convertLvalueExpression(*stream.withExpr);
+        auto type = cast<moore::UnpackedType>(
+            cast<moore::RefType>(value.getType()).getNestedType());
+        auto intType = moore::RefType::get(moore::IntType::get(
+            context.getContext(), type.getBitSize().value(), type.getDomain()));
+        // do not care if it's signed, because we will not do expansion
+        value = context.materializeConversion(intType, value, false, loc);
+      } else {
+        value = context.convertLvalueExpression(*stream.operand);
+      }
+
+      if (!value)
+        return {};
+      operands.push_back(value);
+    }
+    Value value;
+    if (operands.size() == 1) {
+      // There must be at least one element, otherwise slang will report an
+      // error
+      value = operands.front();
+    } else {
+      value = builder.create<moore::ConcatRefOp>(loc, operands).getResult();
+    }
+
+    if (expr.sliceSize == 0) {
+      return value;
+    }
+
+    auto type = cast<moore::IntType>(
+        cast<moore::RefType>(value.getType()).getNestedType());
+    SmallVector<Value> slicedOperands;
+    auto widthSum = type.getWidth();
+    auto domain = type.getDomain();
+    auto iterMax = widthSum / expr.sliceSize;
+    auto remainSize = widthSum % expr.sliceSize;
+
+    for (size_t i = 0; i < iterMax; i++) {
+      auto extractResultType = moore::RefType::get(
+          moore::IntType::get(context.getContext(), expr.sliceSize, domain));
+
+      auto extracted = builder.create<moore::ExtractRefOp>(
+          loc, extractResultType, value, i * expr.sliceSize);
+      slicedOperands.push_back(extracted);
+    }
+    // Handle other wire
+    if (remainSize) {
+      auto extractResultType = moore::RefType::get(
+          moore::IntType::get(context.getContext(), remainSize, domain));
+
+      auto extracted = builder.create<moore::ExtractRefOp>(
+          loc, extractResultType, value, iterMax * expr.sliceSize);
+      slicedOperands.push_back(extracted);
+    }
+
+    return builder.create<moore::ConcatRefOp>(loc, slicedOperands);
+  }
+
   Value visit(const slang::ast::MemberAccessExpression &expr) {
     auto type = context.convertType(*expr.type);
     auto valueType = expr.value().type;
@@ -967,8 +1102,9 @@ Value Context::convertRvalueExpression(const slang::ast::Expression &expr,
                                        Type requiredType) {
   auto loc = convertLocation(expr.sourceRange);
   auto value = expr.visit(RvalueExprVisitor(*this, loc));
-  if (value && requiredType && value.getType() != requiredType)
-    value = builder.create<moore::ConversionOp>(loc, requiredType, value);
+  if (value && requiredType)
+    value =
+        materializeConversion(requiredType, value, expr.type->isSigned(), loc);
   return value;
 }
 
@@ -1063,4 +1199,44 @@ Value Context::convertToSimpleBitVector(Value value) {
   mlir::emitError(value.getLoc()) << "expression of type " << value.getType()
                                   << " cannot be cast to a simple bit vector";
   return {};
+}
+
+Value Context::materializeConversion(Type type, Value value, bool isSigned,
+                                     Location loc) {
+  if (type == value.getType())
+    return value;
+  auto dstPacked = dyn_cast<moore::PackedType>(type);
+  auto srcPacked = dyn_cast<moore::PackedType>(value.getType());
+
+  // Resize the value if needed.
+  if (dstPacked && srcPacked && dstPacked.getBitSize() &&
+      srcPacked.getBitSize() &&
+      *dstPacked.getBitSize() != *srcPacked.getBitSize()) {
+    auto dstWidth = *dstPacked.getBitSize();
+    auto srcWidth = *srcPacked.getBitSize();
+
+    // Convert the value to a simple bit vector which we can extend or truncate.
+    auto srcWidthType = moore::IntType::get(value.getContext(), srcWidth,
+                                            srcPacked.getDomain());
+    if (value.getType() != srcWidthType)
+      value = builder.create<moore::ConversionOp>(value.getLoc(), srcWidthType,
+                                                  value);
+
+    // Create truncation or sign/zero extension ops depending on the source and
+    // destination width.
+    auto dstWidthType = moore::IntType::get(value.getContext(), dstWidth,
+                                            srcPacked.getDomain());
+    if (dstWidth < srcWidth) {
+      value = builder.create<moore::TruncOp>(loc, dstWidthType, value);
+    } else if (dstWidth > srcWidth) {
+      if (isSigned)
+        value = builder.create<moore::SExtOp>(loc, dstWidthType, value);
+      else
+        value = builder.create<moore::ZExtOp>(loc, dstWidthType, value);
+    }
+  }
+
+  if (value.getType() != type)
+    value = builder.create<moore::ConversionOp>(loc, type, value);
+  return value;
 }

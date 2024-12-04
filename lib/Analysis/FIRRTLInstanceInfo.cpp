@@ -46,6 +46,8 @@ void InstanceInfo::LatticeValue::markConstant(bool constant) {
   value = constant;
 }
 
+void InstanceInfo::LatticeValue::markMixed() { kind = Mixed; }
+
 void InstanceInfo::LatticeValue::mergeIn(LatticeValue that) {
   if (kind > that.kind)
     return;
@@ -66,48 +68,97 @@ void InstanceInfo::LatticeValue::mergeIn(bool value) {
   mergeIn(latticeValue);
 }
 
+InstanceInfo::LatticeValue InstanceInfo::LatticeValue::operator!() {
+  if (isUnknown() || isMixed())
+    return *this;
+
+  auto invert = LatticeValue();
+  invert.markConstant(!getConstant());
+  return invert;
+}
+
 InstanceInfo::InstanceInfo(Operation *op, mlir::AnalysisManager &am) {
   auto &iGraph = am.getAnalysis<InstanceGraph>();
 
+  // Setup circuit attributes based on presence of annotations.
   circuitAttributes.effectiveDut = iGraph.getTopLevelNode()->getModule();
+  for (auto *node : iGraph) {
+    auto moduleOp = node->getModule();
+    AnnotationSet annotations(moduleOp);
+    if (annotations.hasAnnotation(dutAnnoClass)) {
+      circuitAttributes.dut = moduleOp;
+      circuitAttributes.effectiveDut = moduleOp;
+    }
+  }
 
-  // Visit modules in reverse post-order (visit parents before children) because
-  // information flows in this direction---the attributes of modules are
-  // determinend by their instantiations.
+  // Setup boundary conditions for any modules without users.
+  for (auto *node : iGraph) {
+    if (!node->noUses())
+      continue;
+
+    auto moduleOp = node->getModule();
+    ModuleAttributes &attributes = moduleAttributes[moduleOp];
+
+    attributes.underDut.mergeIn(isDut(moduleOp));
+    attributes.inDesign.mergeIn(isDut(moduleOp));
+    attributes.inEffectiveDesign.mergeIn(isEffectiveDut(moduleOp) || !hasDut());
+    attributes.underLayer.mergeIn(false);
+  }
+
+  // Visit modules in reverse post-order (visit parents before children) to
+  // merge parent attributes and per-instance attributes into children.
   DenseSet<InstanceGraphNode *> visited;
   for (auto *root : iGraph) {
     for (auto *modIt : llvm::inverse_post_order_ext(root, visited)) {
+      visited.insert(modIt);
       auto moduleOp = modIt->getModule();
       ModuleAttributes &attributes = moduleAttributes[moduleOp];
 
-      // Set DUT-related attributes.
-      auto isDut = AnnotationSet(moduleOp).hasAnnotation(dutAnnoClass);
+      AnnotationSet annotations(moduleOp);
+      auto isDut = annotations.hasAnnotation(dutAnnoClass);
+      auto isGCCompanion = annotations.hasAnnotation(companionAnnoClass);
+
       if (isDut) {
-        circuitAttributes.dut = modIt->getModule();
-        circuitAttributes.effectiveDut = modIt->getModule();
+        attributes.underDut.markConstant(true);
+        attributes.inDesign.markConstant(true);
+        attributes.inEffectiveDesign.markConstant(true);
       }
 
-      // If the module is not instantiated, then set attributes and early exit.
-      if (modIt->noUses()) {
-        attributes.underDut.markConstant(false);
-        attributes.underLayer.markConstant(false);
-        continue;
+      if (isGCCompanion) {
+        attributes.inDesign.mergeIn(false);
+        attributes.inEffectiveDesign.mergeIn(false);
+        attributes.underLayer.mergeIn(true);
       }
 
-      // Merge in attributes from modules that instantiate this module.
+      // Merge in values based on the instantiations of this module.
       for (auto *useIt : modIt->uses()) {
         auto parentOp = useIt->getParent()->getModule();
         auto parentAttrs = moduleAttributes.find(parentOp)->getSecond();
-        // Merge underDut.
-        if (this->isDut(parentOp) || isDut)
-          attributes.underDut.mergeIn(true);
-        else
+
+        // Update underDut.
+        if (!isDut)
           attributes.underDut.mergeIn(parentAttrs.underDut);
-        // Merge underLayer.
-        if (useIt->getInstance()->getParentOfType<LayerBlockOp>())
-          attributes.underLayer.mergeIn(true);
-        else
-          attributes.underLayer.mergeIn(parentAttrs.underLayer);
+
+        // Update underLayer.
+        auto instanceOp = useIt->getInstance();
+        bool underLayer = (isa<InstanceOp>(instanceOp) &&
+                           cast<InstanceOp>(instanceOp).getLowerToBind()) ||
+                          instanceOp->getParentOfType<LayerBlockOp>();
+        if (!isGCCompanion) {
+          if (underLayer)
+            attributes.underLayer.mergeIn(true);
+          else
+            attributes.underLayer.mergeIn(parentAttrs.underLayer);
+        }
+
+        // Update inDesign and inEffectiveDesign.
+        if (underLayer) {
+          attributes.inDesign.mergeIn(false);
+          attributes.inEffectiveDesign.mergeIn(false);
+        } else if (!isDut && !isGCCompanion) {
+          attributes.inDesign.mergeIn(parentAttrs.inDesign);
+          attributes.inEffectiveDesign.mergeIn(parentAttrs.inEffectiveDesign);
+        }
       }
     }
   }
@@ -128,18 +179,25 @@ InstanceInfo::InstanceInfo(Operation *op, mlir::AnalysisManager &am) {
     llvm::dbgs() << "\n" << llvm::indent(4) << "effectiveDut: ";
     circuitAttributes.effectiveDut->print(llvm::dbgs(), flags);
     llvm::dbgs() << "\n" << llvm::indent(2) << "module attributes:\n";
-    for (auto *node : llvm::depth_first(iGraph.getTopLevelNode())) {
-      auto moduleOp = node->getModule();
-      auto attributes = moduleAttributes[moduleOp];
-      llvm::dbgs().indent(4)
-          << "- module: " << moduleOp.getModuleName() << "\n"
-          << llvm::indent(6)
-          << "isDut: " << (isDut(moduleOp) ? "true" : "false") << "\n"
-          << llvm::indent(6)
-          << "isEffectiveDue: " << (isEffectiveDut(moduleOp) ? "true" : "false")
-          << "\n"
-          << llvm::indent(6) << "underDut: " << attributes.underDut << "\n"
-          << llvm::indent(6) << "underLayer: " << attributes.underLayer << "\n";
+    visited.clear();
+    for (auto *root : iGraph) {
+      for (auto *modIt : llvm::inverse_post_order_ext(root, visited)) {
+        visited.insert(modIt);
+        auto moduleOp = modIt->getModule();
+        auto attributes = moduleAttributes[moduleOp];
+        llvm::dbgs().indent(4)
+            << "- module: " << moduleOp.getModuleName() << "\n"
+            << llvm::indent(6)
+            << "isDut: " << (isDut(moduleOp) ? "true" : "false") << "\n"
+            << llvm::indent(6) << "isEffectiveDue: "
+            << (isEffectiveDut(moduleOp) ? "true" : "false") << "\n"
+            << llvm::indent(6) << "underDut: " << attributes.underDut << "\n"
+            << llvm::indent(6) << "underLayer: " << attributes.underLayer
+            << "\n"
+            << llvm::indent(6) << "inDesign: " << attributes.inDesign << "\n"
+            << llvm::indent(6)
+            << "inEffectiveDesign: " << attributes.inEffectiveDesign << "\n";
+      }
     }
   });
 }
@@ -197,4 +255,24 @@ bool InstanceInfo::anyInstanceUnderLayer(igraph::ModuleOpInterface op) {
 bool InstanceInfo::allInstancesUnderLayer(igraph::ModuleOpInterface op) {
   auto underLayer = getModuleAttributes(op).underLayer;
   return underLayer.isConstant() && underLayer.getConstant();
+}
+
+bool InstanceInfo::anyInstanceInDesign(igraph::ModuleOpInterface op) {
+  auto inDesign = getModuleAttributes(op).inDesign;
+  return inDesign.isMixed() || allInstancesInDesign(op);
+}
+
+bool InstanceInfo::allInstancesInDesign(igraph::ModuleOpInterface op) {
+  auto inDesign = getModuleAttributes(op).inDesign;
+  return inDesign.isConstant() && inDesign.getConstant();
+}
+
+bool InstanceInfo::anyInstanceInEffectiveDesign(igraph::ModuleOpInterface op) {
+  auto inEffectiveDesign = getModuleAttributes(op).inEffectiveDesign;
+  return inEffectiveDesign.isMixed() || allInstancesInEffectiveDesign(op);
+}
+
+bool InstanceInfo::allInstancesInEffectiveDesign(igraph::ModuleOpInterface op) {
+  auto inEffectiveDesign = getModuleAttributes(op).inEffectiveDesign;
+  return inEffectiveDesign.isConstant() && inEffectiveDesign.getConstant();
 }

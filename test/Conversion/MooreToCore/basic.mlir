@@ -65,18 +65,6 @@ func.func @Expressions(%arg0: !moore.i1, %arg1: !moore.l1, %arg2: !moore.i6, %ar
   moore.constant 12 : !moore.i32
   moore.constant 3 : !moore.i6
 
-  moore.conversion %arg0 : !moore.i1 -> !moore.l1
-  // CHECK-NEXT: [[V0:%.+]] = hw.constant 0 : i2 
-  // CHECK-NEXT: comb.concat [[V0]], %arg2 : i2, i6 
-  moore.conversion %arg2 : !moore.i6 -> !moore.l8
-  // CHECK-NEXT: [[V0:%.+]] = comb.extract %arg2 from 4 : (i6) -> i2
-  // CHECK-NEXT: [[V1:%.+]] = hw.constant 0 : i2
-  // CHECK-NEXT: [[V2:%.+]] = comb.icmp eq [[V0]], [[V1]] : i2
-  // CHECK-NEXT: [[V3:%.+]] = comb.extract %arg2 from 0 : (i6) -> i4
-  // CHECK-NEXT: [[V4:%.+]] = hw.constant -1 : i4
-  // CHECK-NEXT: comb.mux [[V2]], [[V3]], [[V4]] : i4
-  moore.conversion %arg2 : !moore.i6 -> !moore.l4
-
   // CHECK-NEXT: [[V0:%.+]] = hw.constant 0 : i5
   // CHECK-NEXT: [[V1:%.+]] = comb.concat [[V0]], %arg0 : i5, i1
   // CHECK-NEXT: comb.shl %arg2, [[V1]] : i6
@@ -317,6 +305,25 @@ func.func @Statements(%arg0: !moore.i42) {
   // CHECK: llhd.drv %x, %arg0 after [[TMP]] : !hw.inout<i42>
   moore.nonblocking_assign %x, %arg0 : i42
   // CHECK-NEXT: return
+  return
+}
+
+// CHECK-LABEL: func @FormatStrings
+func.func @FormatStrings(%arg0: !moore.i42) {
+  // CHECK: [[TMP:%.+]] = sim.fmt.lit "hello"
+  %0 = moore.fmt.literal "hello"
+  // CHECK: sim.fmt.concat ([[TMP]], [[TMP]])
+  %1 = moore.fmt.concat (%0, %0)
+  // CHECK: sim.fmt.dec %arg0 : i42
+  moore.fmt.int decimal %arg0, width 42, align right, pad space : i42
+  // CHECK: sim.fmt.bin %arg0 : i42
+  moore.fmt.int binary %arg0, width 42, align right, pad space : i42
+  // CHECK: sim.fmt.hex %arg0 : i42
+  moore.fmt.int hex_lower %arg0, width 42, align right, pad space : i42
+  // CHECK: sim.fmt.hex %arg0 : i42
+  moore.fmt.int hex_upper %arg0, width 42, align right, pad space : i42
+  // CHECK: sim.proc.print [[TMP]]
+  moore.builtin.display %0
   return
 }
 
@@ -836,3 +843,58 @@ dbg.variable "b", %dbg0 scope %dbg1 : !moore.l32
 dbg.array [%dbg0] : !moore.l32
 // CHECK: dbg.struct {"q": [[TMP]]} : i32
 dbg.struct {"q": %dbg0} : !moore.l32
+
+// CHECK-LABEL: hw.module @Assert
+moore.module @Assert(in %cond : !moore.l1)  {
+  moore.procedure always {
+  // CHECK: verif.assert %cond label "cond" : i1
+  moore.assert immediate %cond label "cond" : l1
+  // CHECK: verif.assume %cond label "" : i1
+  moore.assume observed %cond  : l1
+  // CHECK: verif.cover %cond label "" : i1
+  moore.cover final %cond : l1
+  moore.return
+  }
+}
+
+// CHECK-LABEL: hw.module @StringConstant
+moore.module @StringConstant() {
+  moore.procedure initial {
+    // CHECK: hw.constant 1415934836 : i32
+    %str = moore.string_constant "Test" : i32
+    // CHECK: hw.constant 0 : i0
+    %str_empty = moore.string_constant "" : i0
+    moore.return
+  }
+}
+
+// CHECK-LABEL: func.func @Conversions
+func.func @Conversions(%arg0: !moore.i16, %arg1: !moore.l16) {
+  // CHECK: [[TMP:%.+]] = comb.extract %arg0 from 0 : (i16) -> i8
+  // CHECK: dbg.variable "trunc", [[TMP]]
+  %0 = moore.trunc %arg0 : i16 -> i8
+  dbg.variable "trunc", %0 : !moore.i8
+
+  // CHECK: [[ZEXT:%.+]] = hw.constant 0 : i16
+  // CHECK: [[TMP:%.+]] = comb.concat [[ZEXT]], %arg0 : i16, i16
+  // CHECK: dbg.variable "zext", [[TMP]]
+  %1 = moore.zext %arg0 : i16 -> i32
+  dbg.variable "zext", %1 : !moore.i32
+
+  // CHECK: [[SIGN:%.+]] = comb.extract %arg0 from 15 : (i16) -> i1
+  // CHECK: [[SEXT:%.+]] = comb.replicate [[SIGN]] : (i1) -> i16
+  // CHECK: [[TMP:%.+]] = comb.concat [[SEXT]], %arg0 : i16, i16
+  // CHECK: dbg.variable "sext", [[TMP]]
+  %2 = moore.sext %arg0 : i16 -> i32
+  dbg.variable "sext", %2 : !moore.i32
+
+  // CHECK: dbg.variable "i2l", %arg0 : i16
+  %3 = moore.conversion %arg0 : !moore.i16 -> !moore.l16
+  dbg.variable "i2l", %3 : !moore.l16
+
+  // CHECK: dbg.variable "l2i", %arg1 : i16
+  %4 = moore.conversion %arg1 : !moore.l16 -> !moore.i16
+  dbg.variable "l2i", %4 : !moore.i16
+
+  return
+}

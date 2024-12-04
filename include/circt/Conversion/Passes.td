@@ -469,8 +469,13 @@ def HandshakeToDC : Pass<"lower-handshake-to-dc", "mlir::ModuleOp"> {
     function with graph region behaviour. Thus, for now, we just use `hw.module`
     as a container operation.
   }];
-  let constructor = "circt::createHandshakeToDCPass()";
   let dependentDialects = ["dc::DCDialect", "mlir::func::FuncDialect", "hw::HWDialect"];
+  let options = [
+    Option<"clkName", "clk-name", "std::string", "\"clk\"",
+           "Name of the clock signal to use in the generated DC module">,
+    Option<"rstName", "rst-name", "std::string", "\"rst\"",
+           "Name of the reset signal to use in the generated DC module">,
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -512,12 +517,18 @@ def HandshakeToHW : Pass<"lower-handshake-to-hw", "mlir::ModuleOp"> {
 def ConvertMooreToCore : Pass<"convert-moore-to-core", "mlir::ModuleOp"> {
   let summary = "Convert Moore to Core";
   let description = [{
-    This pass translates Moore to the core dialects (Comb/HW/LLHD).
+    This pass translates Moore to the core dialects.
   }];
   let constructor = "circt::createConvertMooreToCorePass()";
-  let dependentDialects = ["comb::CombDialect", "hw::HWDialect",
-                           "llhd::LLHDDialect", "mlir::cf::ControlFlowDialect",
-                           "mlir::scf::SCFDialect"];
+  let dependentDialects = [
+    "comb::CombDialect",
+    "hw::HWDialect",
+    "llhd::LLHDDialect",
+    "mlir::cf::ControlFlowDialect",
+    "mlir::scf::SCFDialect",
+    "sim::SimDialect",
+    "verif::VerifDialect",
+  ];
 }
 
 //===----------------------------------------------------------------------===//
@@ -576,7 +587,7 @@ def LowerHWToSV : Pass<"lower-hw-to-sv", "hw::HWModuleOp"> {
 // HWToBTOR2
 //===----------------------------------------------------------------------===//
 
-def ConvertHWToBTOR2 : Pass<"convert-hw-to-btor2", "hw::HWModuleOp"> {
+def ConvertHWToBTOR2 : Pass<"convert-hw-to-btor2", "mlir::ModuleOp"> {
   let summary = "Convert HW to BTOR2";
   let description = [{
     This pass converts a HW module into a state transition system that is then
@@ -760,7 +771,7 @@ def LowerSeqToSV: Pass<"lower-seq-to-sv",  "mlir::ModuleOp"> {
     Option<"emitSeparateAlwaysBlocks", "emit-separate-always-blocks", "bool", "false",
            "Emit assigments to registers in separate always blocks">,
     Option<"lowerToAlwaysFF", "lower-to-always-ff", "bool", "true",
-           "Place assignments to registers into `always_ff` blocks">
+           "Place assignments to registers into `always_ff` blocks if possible">
   ];
   let statistics = [
     Statistic<"numSubaccessRestored", "num-subaccess-restored",
@@ -789,5 +800,33 @@ def LowerSimToSV: Pass<"lower-sim-to-sv",  "mlir::ModuleOp"> {
     "circt::hw::HWDialect"
   ];
 }
+
+//===----------------------------------------------------------------------===//
+// ConvertCombToAIG
+//===----------------------------------------------------------------------===//
+
+def ConvertCombToAIG: Pass<"convert-comb-to-aig",  "hw::HWModuleOp"> {
+  let summary = "Lower Comb ops to AIG ops.";
+  let dependentDialects = [
+    "circt::comb::CombDialect",
+    "circt::aig::AIGDialect",
+  ];
+}
+
+//===----------------------------------------------------------------------===//
+// ConvertAIGToComb
+//===----------------------------------------------------------------------===//
+
+def ConvertAIGToComb: Pass<"convert-aig-to-comb", "hw::HWModuleOp"> {
+  let summary = "Lower AIG ops to Comb ops";
+  let description = [{
+    This pass converts AIG operations to Comb operations. This is mostly
+    used for verifying post-synthesis results.
+  }];
+  let dependentDialects = [
+    "circt::comb::CombDialect", "circt::hw::HWDialect"
+  ];
+}
+
 
 #endif // CIRCT_CONVERSION_PASSES_TD

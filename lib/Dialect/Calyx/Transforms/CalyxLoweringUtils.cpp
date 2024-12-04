@@ -139,6 +139,8 @@ Value getComponentOutput(calyx::ComponentOp compOp, unsigned outPortIdx) {
 Type convIndexType(OpBuilder &builder, Type type) {
   if (type.isIndex())
     return builder.getI32Type();
+  if (type.isIntOrFloat() && !type.isInteger())
+    return builder.getIntegerType(type.getIntOrFloatBitWidth());
   return type;
 }
 
@@ -203,6 +205,17 @@ Value MemoryInterface::done() {
   auto done = doneOpt();
   assert(done.has_value() && "Memory does not have done");
   return done.value();
+}
+
+std::string MemoryInterface::memName() {
+  if (auto *memOp = std::get_if<calyx::MemoryOp>(&impl); memOp) {
+    return memOp->getName().str();
+  }
+
+  if (auto *memOp = std::get_if<calyx::SeqMemoryOp>(&impl); memOp) {
+    return memOp->getName().str();
+  }
+  return std::get<MemoryPortsImpl>(impl).memName;
 }
 
 std::optional<Value> MemoryInterface::readDataOpt() {
@@ -659,8 +672,9 @@ void InlineCombGroups::recurseInlineCombGroups(
         isa<calyx::RegisterOp, calyx::MemoryOp, calyx::SeqMemoryOp,
             hw::ConstantOp, mlir::arith::ConstantOp, calyx::MultPipeLibOp,
             calyx::DivUPipeLibOp, calyx::DivSPipeLibOp, calyx::RemSPipeLibOp,
-            calyx::RemUPipeLibOp, mlir::scf::WhileOp, calyx::InstanceOp>(
-            src.getDefiningOp()))
+            calyx::RemUPipeLibOp, mlir::scf::WhileOp, calyx::InstanceOp,
+            calyx::ConstantOp, calyx::AddFOpIEEE754, calyx::MulFOpIEEE754,
+            calyx::CompareFOpIEEE754>(src.getDefiningOp()))
       continue;
 
     auto srcCombGroup = dyn_cast<calyx::CombGroupOp>(
@@ -753,11 +767,11 @@ BuildReturnRegs::partiallyLowerFuncToComp(mlir::func::FuncOp funcOp,
 
   for (auto argType : enumerate(funcOp.getResultTypes())) {
     auto convArgType = calyx::convIndexType(rewriter, argType.value());
-    assert(isa<IntegerType>(convArgType) && "unsupported return type");
-    unsigned width = convArgType.getIntOrFloatBitWidth();
+    assert((isa<IntegerType>(convArgType) || isa<FloatType>(convArgType)) &&
+           "unsupported return type");
     std::string name = "ret_arg" + std::to_string(argType.index());
-    auto reg =
-        createRegister(funcOp.getLoc(), rewriter, getComponent(), width, name);
+    auto reg = createRegister(funcOp.getLoc(), rewriter, getComponent(),
+                              convArgType.getIntOrFloatBitWidth(), name);
     getState().addReturnReg(reg, argType.index());
 
     rewriter.setInsertionPointToStart(
@@ -827,6 +841,102 @@ BuildCallInstance::getCallComponent(mlir::func::CallOp callOp) const {
       return componentOp;
   }
   return nullptr;
+}
+
+PredicateInfo getPredicateInfo(CmpFPredicate pred) {
+  using CombLogic = PredicateInfo::CombLogic;
+  using Port = PredicateInfo::InputPorts::Port;
+  PredicateInfo info;
+  switch (pred) {
+  case CmpFPredicate::OEQ: {
+    info.logic = CombLogic::And;
+    info.inputPorts = {{Port::Eq, /*inverted=*/false},
+                       {Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::OGT: {
+    info.logic = PredicateInfo::CombLogic::And;
+    info.inputPorts = {{Port::Gt, /*inverted=*/false},
+                       {Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::OGE: {
+    info.logic = PredicateInfo::CombLogic::And;
+    info.inputPorts = {{Port::Lt, /*inverted=*/true},
+                       {Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::OLT: {
+    info.logic = PredicateInfo::CombLogic::And;
+    info.inputPorts = {{Port::Lt, /*inverted=*/false},
+                       {Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::OLE: {
+    info.logic = PredicateInfo::CombLogic::And;
+    info.inputPorts = {{Port::Gt, /*inverted=*/true},
+                       {Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::ONE: {
+    info.logic = PredicateInfo::CombLogic::And;
+    info.inputPorts = {{Port::Eq, /*inverted=*/true},
+                       {Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::ORD: {
+    info.logic = PredicateInfo::CombLogic::None;
+    info.inputPorts = {{Port::Unordered, /*inverted=*/true}};
+    break;
+  }
+  case CmpFPredicate::UEQ: {
+    info.logic = PredicateInfo::CombLogic::Or;
+    info.inputPorts = {{Port::Eq, /*inverted=*/false},
+                       {Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::UGT: {
+    info.logic = PredicateInfo::CombLogic::Or;
+    info.inputPorts = {{Port::Gt, /*inverted=*/false},
+                       {Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::UGE: {
+    info.logic = PredicateInfo::CombLogic::Or;
+    info.inputPorts = {{Port::Lt, /*inverted=*/true},
+                       {Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::ULT: {
+    info.logic = PredicateInfo::CombLogic::Or;
+    info.inputPorts = {{Port::Lt, /*inverted=*/false},
+                       {Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::ULE: {
+    info.logic = PredicateInfo::CombLogic::Or;
+    info.inputPorts = {{Port::Gt, /*inverted=*/true},
+                       {Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::UNE: {
+    info.logic = PredicateInfo::CombLogic::Or;
+    info.inputPorts = {{Port::Eq, /*inverted=*/true},
+                       {Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::UNO: {
+    info.logic = PredicateInfo::CombLogic::None;
+    info.inputPorts = {{Port::Unordered, /*inverted=*/false}};
+    break;
+  }
+  case CmpFPredicate::AlwaysTrue:
+  case CmpFPredicate::AlwaysFalse:
+    info.logic = PredicateInfo::CombLogic::None;
+    break;
+  }
+
+  return info;
 }
 
 } // namespace calyx
