@@ -555,26 +555,32 @@ struct RvalueExprVisitor {
         if (!listExpr->type->isSimpleBitVector()) {
           if (listExpr->type->isUnpackedArray()) {
             if (listExpr->type->isFixedSize()) {
-              auto arrayType = dyn_cast<moore::UnpackedArrayType>(context.convertType(*listExpr->type));
+              auto arrayType = dyn_cast<moore::UnpackedArrayType>(
+                  context.convertType(*listExpr->type));
               auto elementType = arrayType.getElementType();
               auto elementSize = elementType.getBitSize().value();
-              auto& type = listExpr->type->as<slang::ast::FixedSizeUnpackedArrayType>();
+              auto &type =
+                  listExpr->type->as<slang::ast::FixedSizeUnpackedArrayType>();
               auto lower = type.getFixedRange().lower();
               auto upper = type.getFixedRange().upper();
               for (size_t i = lower; i <= upper; i++) {
                 auto value = context.convertRvalueExpression(*listExpr);
-                auto elemValue = builder.create<moore::ExtractOp>(loc, elementType, value, i);
+                auto elemValue = builder.create<moore::ExtractOp>(
+                    loc, elementType, value, i);
+                if (i > lower) { //avoiding repetition of cond in the vector
+                  conditions.push_back(cond);
+                }
                 cond = builder.create<moore::EqOp>(loc, lhs, elemValue);
-                conditions.push_back(cond); //TODO double cond
               }
             } else {
-              mlir::emitError(
-                  loc, "unsized unpacked arrays in 'inside' expressions not supported");
+              mlir::emitError(loc, "unsized unpacked arrays in 'inside' "
+                                   "expressions not supported");
               return {};
             }
           } else {
             mlir::emitError(
-                loc, "only simple bit vectors supported in 'inside' expressions");
+                loc,
+                "only simple bit vectors supported in 'inside' expressions");
             return {};
           }
         } else {
