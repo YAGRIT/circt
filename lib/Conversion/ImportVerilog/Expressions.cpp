@@ -555,23 +555,13 @@ struct RvalueExprVisitor {
         if (!listExpr->type->isSimpleBitVector()) {
           if (listExpr->type->isUnpackedArray()) {
             if (listExpr->type->isFixedSize()) {
-              auto arrayType = dyn_cast<moore::UnpackedArrayType>(
-                  context.convertType(*listExpr->type));
-              auto elementType = arrayType.getElementType();
-              auto elementSize = elementType.getBitSize().value();
-              auto &type =
+              const auto &uaType =
                   listExpr->type->as<slang::ast::FixedSizeUnpackedArrayType>();
-              auto lower = type.getFixedRange().lower();
-              auto upper = type.getFixedRange().upper();
-              for (size_t i = lower; i <= upper; i++) {
-                auto value = context.convertRvalueExpression(*listExpr);
-                auto elemValue = builder.create<moore::ExtractOp>(
-                    loc, elementType, value, i);
-                if (i > lower) { // avoiding repetition of cond in the vector
-                  conditions.push_back(cond);
-                }
-                cond = builder.create<moore::EqOp>(loc, lhs, elemValue);
-              }
+              auto value = context.convertRvalueExpression(*listExpr);
+              context.traverseUnpacked(uaType, value, conditions, lhs, loc);
+              cond = conditions.back();
+              conditions
+                  .pop_back(); // avoiding repetition of cond in the vector
             } else {
               mlir::emitError(loc, "unsized unpacked arrays in 'inside' "
                                    "expressions not supported");
@@ -1123,4 +1113,33 @@ Value Context::materializeConversion(Type type, Value value, bool isSigned,
   if (value.getType() != type)
     value = builder.create<moore::ConversionOp>(loc, type, value);
   return value;
+}
+
+void Context::traverseUnpacked(
+    const slang::ast::FixedSizeUnpackedArrayType &slangType, Value value,
+    SmallVector<Value> &conditions, Value lhs, Location loc) {
+  Value cond;
+  // auto &slangType =
+  // listExpr->type->as<slang::ast::FixedSizeUnpackedArrayType>();
+  auto mooreType = dyn_cast<moore::UnpackedArrayType>(convertType(slangType));
+  const auto &elementType = slangType.elementType;
+  for (slang::int32_t i = slangType.getFixedRange().lower();
+       i <= slangType.getFixedRange().upper(); i++) {
+    auto elemValue = builder.create<moore::ExtractOp>(
+        loc, mooreType.getElementType(), value, i);
+    if (elementType.isUnpackedArray()) {
+      traverseUnpacked(elementType.as<slang::ast::FixedSizeUnpackedArrayType>(),
+                       elemValue, conditions, lhs, loc);
+    } else if (elementType.isSingular()) {
+      if (elementType.isIntegral()) {
+        cond = builder.create<moore::WildcardEqOp>(loc, lhs, elemValue);
+      } else {
+        cond = builder.create<moore::EqOp>(loc, lhs, elemValue);
+      }
+      conditions.push_back(cond);
+    } else {
+      mlir::emitError(loc, "only singular or sized unpacked arrays supported "
+                           "in unpacked arrays in 'inside' expressions");
+    }
+  }
 }
