@@ -5,7 +5,7 @@ func.func @getTime() -> !llhd.time {
   return %time : !llhd.time
 }
 
-hw.module @basic(in %init : i32, in %cond : i1, in %in0 : i32, in %in1 : i32, out prb1 : i32, out prb2 : i32, out prb3 : i32, out prb4 : i32, out prb5 : i32, out prb6 : i32, out prb7 : i32) {
+hw.module @basic(in %init : i32, in %cond : i1, in %in0 : i32, in %in1 : i32, in %index : i4, out prb1 : i32, out prb2 : i32, out prb3 : i32, out prb4 : i32, out prb5 : i32, out prb6 : i32, out prb7 : i32, out prb9: i32) {
   %opaque_time = func.call @getTime() : () -> !llhd.time
   %epsilon = llhd.constant_time <0ns, 0d, 1e>
   %delta = llhd.constant_time <0ns, 1d, 0e>
@@ -25,6 +25,8 @@ hw.module @basic(in %init : i32, in %cond : i1, in %in0 : i32, in %in1 : i32, ou
   %sig6 = llhd.sig %init : i32
   // Not promoted because of multiple drivers
   %sig7 = llhd.sig %init : i32
+
+  %sig8 = llhd.sig %init : i32
 
   llhd.drv %sig1, %in0 after %epsilon : !hw.inout<i32>
   // CHECK: [[DELAY:%.+]] = llhd.delay %in0 by <0ns, 1d, 0e> : i32
@@ -51,7 +53,22 @@ hw.module @basic(in %init : i32, in %cond : i1, in %in0 : i32, in %in1 : i32, ou
   %prb6 = llhd.prb %sig6 : !hw.inout<i32>
   // CHECK: [[PRB7:%.+]] = llhd.prb %sig7
   %prb7 = llhd.prb %sig7 : !hw.inout<i32>
+  
+  %prb8 = llhd.prb %sig8 : !hw.inout<i32>
 
-  // CHECK: hw.output %in0, [[DELAY]], [[PRB3]], %init, [[PRB5]], [[PRB6]], [[PRB7]] :
-  hw.output %prb1, %prb2, %prb3, %prb4, %prb5, %prb6, %prb7 : i32, i32, i32, i32, i32, i32, i32
+  %c0_i512 = hw.constant 0 : i512
+  // CHECK: [[BC:%.+]] = hw.bitcast %c0_i512 : (i512) -> !hw.array<16xi32>
+  %bc = hw.bitcast %c0_i512 : (i512) -> !hw.array<16xi32>
+  %array = llhd.sig %bc : !hw.array<16xi32>
+
+  // CHECK: [[ARRAY_EL:%.+]] = hw.array_get [[BC]][%index] : !hw.array<16xi32>, i4
+  %array_el = llhd.sig.array_get %array[%index] : !hw.inout<array<16xi32>>
+
+  // CHECK: [[ARRAY_SIG:%.+]] = llhd.sig [[ARRAY_EL]] : i32
+  llhd.drv %array_el, %prb8 after %epsilon : !hw.inout<i32>
+  // CHECK: [[PRB9:%.+]] = llhd.prb [[ARRAY_SIG]] : !hw.inout<i32>
+  %prb9 = llhd.prb %array_el : !hw.inout<i32>
+
+  // CHECK: hw.output %in0, [[DELAY]], [[PRB3]], %init, [[PRB5]], [[PRB6]], [[PRB7]], [[PRB9]] : i32, i32, i32, i32, i32, i32, i32, i32
+  hw.output %prb1, %prb2, %prb3, %prb4, %prb5, %prb6, %prb7, %prb9 : i32, i32, i32, i32, i32, i32, i32, i32
 }
