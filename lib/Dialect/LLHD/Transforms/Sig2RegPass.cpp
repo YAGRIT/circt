@@ -13,6 +13,8 @@
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/LLHD/IR/LLHDOps.h"
 #include "circt/Dialect/LLHD/Transforms/Passes.h"
+#include "circt/Support/LLVM.h"
+#include "mlir/Support/LLVM.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "llhd-sig2reg"
@@ -36,6 +38,8 @@ struct Sig2RegPass : public circt::llhd::impl::Sig2RegBase<Sig2RegPass> {
 static LogicalResult promote(llhd::SignalOp sigOp) {
   SmallVector<llhd::PrbOp> probes;
   llhd::DrvOp driveOp;
+  llhd::SigArrayGetOp arrayOp;
+
   for (auto *user : sigOp.getResult().getUsers()) {
     if (user->getBlock() != sigOp->getBlock()) {
       LLVM_DEBUG(
@@ -64,6 +68,11 @@ static LogicalResult promote(llhd::SignalOp sigOp) {
       continue;
     }
 
+    if (auto arrayGetOp = dyn_cast<llhd::SigArrayGetOp>(user)) {
+      arrayOp = arrayGetOp;
+      continue;
+    }
+
     LLVM_DEBUG({
       llvm::dbgs() << "Promotion failed: user that is not a probe or drive: "
                    << *user << "\n";
@@ -72,6 +81,7 @@ static LogicalResult promote(llhd::SignalOp sigOp) {
   }
 
   Value replacement;
+  // @TODO IF FIRST OPERAND IS NOT INOUT make second the same
   if (driveOp) {
     auto timeOp = driveOp.getTime().getDefiningOp<llhd::ConstantTimeOp>();
     if (!timeOp)
@@ -86,14 +96,37 @@ static LogicalResult promote(llhd::SignalOp sigOp) {
   } else {
     replacement = sigOp.getInit();
   }
+ 
+  if(arrayOp) {
+    OpBuilder builder(arrayOp);
+      
+    Value arrayVal = replacement;
+    Value indexValue = arrayOp.getIndex(); 
+
+    // Create the hw::ArrayGetOp, 
+    // Note: index can be dynamic 
+    auto replacementArrayGet = builder.create<hw::ArrayGetOp>(
+        arrayOp.getLoc(), arrayVal, indexValue); 
+    
+    auto storeInSig = builder.create<llhd::SignalOp>(
+      arrayOp.getLoc(), replacementArrayGet.getResult()
+    );
+
+    arrayOp.getResult().replaceAllUsesWith(storeInSig);
+    arrayOp.erase();
+  }
 
   for (auto prb : probes) {
     prb.getResult().replaceAllUsesWith(replacement);
     prb.erase();
   }
 
-  if (driveOp)
-    driveOp.erase();
+  if (driveOp) 
+    driveOp.erase(); 
+
+  LLVM_DEBUG({
+    llvm::dbgs() << " - Promoting to: " << replacement << "\n";
+  });
 
   return success();
 }
